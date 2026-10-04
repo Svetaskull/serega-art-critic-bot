@@ -1,10 +1,13 @@
 import asyncio
 import base64
+import hashlib
 import os
+
+from aiohttp import web
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart
-from aiogram.types import Message
+from aiogram.types import Message, Update
 from openai import OpenAI
 
 
@@ -454,27 +457,240 @@ async def channel_post_handler(
 
 
 # =========================================================
-# ЗАПУСК
+# WEBHOOK / ВЕБ-СЕРВЕР
 # =========================================================
 
-async def main():
+# Netrun сам передаёт порт через переменную PORT.
+# Для локального запуска оставляем запасной порт 8080.
+PORT = int(
+    os.getenv(
+        "PORT",
+        "8080"
+    )
+)
+
+# Telegram будет присылать обновления сюда.
+WEBHOOK_PATH = "/telegram-webhook"
+
+# Секрет для проверки webhook-запросов.
+# Отдельно хранить его не нужно:
+# он стабильно вычисляется из Telegram-токена.
+WEBHOOK_SECRET = hashlib.sha256(
+    TELEGRAM_TOKEN.encode("utf-8")
+).hexdigest()
+
+
+def get_external_base_url(
+    request: web.Request
+):
+
+    # Netrun стоит перед нашим приложением как reverse proxy.
+    # Поэтому настоящий публичный HTTPS-протокол и хост
+    # могут приходить в X-Forwarded-* заголовках.
+
+    forwarded_proto = request.headers.get(
+        "X-Forwarded-Proto",
+        request.scheme
+    )
+
+    forwarded_host = request.headers.get(
+        "X-Forwarded-Host",
+        request.host
+    )
+
+    # Иногда proxy перечисляет несколько значений через запятую.
+    scheme = forwarded_proto.split(",")[0].strip()
+    host = forwarded_host.split(",")[0].strip()
+
+    return f"{scheme}://{host}"
+
+
+async def health_handler(
+    request: web.Request
+):
+
+    return web.Response(
+        text=(
+            "Серёга жив. "
+            "Webhook настраивается через /setup-webhook"
+        )
+    )
+
+
+async def setup_webhook_handler(
+    request: web.Request
+):
+
+    base_url = get_external_base_url(
+        request
+    )
+
+    webhook_url = (
+        f"{base_url}{WEBHOOK_PATH}"
+    )
+
+    if not webhook_url.startswith(
+        "https://"
+    ):
+        return web.Response(
+            status=400,
+            text=(
+                "Webhook не настроен: "
+                "нужен публичный HTTPS-адрес. "
+                f"Сейчас получен адрес: {webhook_url}"
+            )
+        )
+
+    await bot.set_webhook(
+        url=webhook_url,
+        secret_token=WEBHOOK_SECRET,
+        allowed_updates=dp.resolve_used_update_types()
+    )
+
+    info = await bot.get_webhook_info()
+
+    print("")
+    print("🔗 WEBHOOK НАСТРОЕН")
+    print(f"🌍 URL: {info.url}")
+    print(
+        f"📬 Ожидают доставки: "
+        f"{info.pending_update_count}"
+    )
+    print("")
+
+    return web.Response(
+        text=(
+            "Готово. Серёга подключён к Telegram через webhook.\n"
+            f"Webhook: {info.url}\n"
+            f"Ожидают доставки: {info.pending_update_count}"
+        )
+    )
+
+
+async def telegram_webhook_handler(
+    request: web.Request
+):
+
+    # Проверяем секретный заголовок Telegram.
+    received_secret = request.headers.get(
+        "X-Telegram-Bot-Api-Secret-Token"
+    )
+
+    if received_secret != WEBHOOK_SECRET:
+
+        print(
+            "⛔ Отклонён запрос "
+            "с неправильным webhook-секретом."
+        )
+
+        return web.Response(
+            status=403,
+            text="Forbidden"
+        )
+
+    try:
+
+        data = await request.json()
+
+        update = Update.model_validate(
+            data,
+            context={
+                "bot": bot
+            }
+        )
+
+        await dp.feed_update(
+            bot,
+            update
+        )
+
+        return web.Response(
+            text="OK"
+        )
+
+    except Exception as e:
+
+        print("")
+        print(
+            "❌ ОШИБКА ПРИ ОБРАБОТКЕ WEBHOOK"
+        )
+        print(
+            type(e).__name__,
+            e
+        )
+        print("")
+
+        # Возвращаем 500, чтобы Telegram понял,
+        # что доставка обновления не удалась
+        # и мог повторить попытку.
+        return web.Response(
+            status=500,
+            text="Error"
+        )
+
+
+async def on_startup(
+    app: web.Application
+):
 
     print("")
     print("=" * 50)
-    print("👨 Серёга 1.0 запущен.")
+    print("👨 Серёга 1.1 запущен.")
+    print("🌐 Режим: webhook.")
     print("🖼 Анализ изображений: включён.")
     print("📚 Альбомы: каждое изображение.")
     print("🎯 Вероятность реакции: 100%.")
     print("📝 Подписи постов: игнорируются.")
+    print(f"🚪 Порт: {PORT}")
     print("=" * 50)
     print("")
 
-    await dp.start_polling(
-        bot
+
+async def on_cleanup(
+    app: web.Application
+):
+
+    await bot.session.close()
+
+
+def create_app():
+
+    app = web.Application()
+
+    app.router.add_get(
+        "/",
+        health_handler
     )
 
+    app.router.add_get(
+        "/setup-webhook",
+        setup_webhook_handler
+    )
+
+    app.router.add_post(
+        WEBHOOK_PATH,
+        telegram_webhook_handler
+    )
+
+    app.on_startup.append(
+        on_startup
+    )
+
+    app.on_cleanup.append(
+        on_cleanup
+    )
+
+    return app
+
+
+# =========================================================
+# ЗАПУСК
+# =========================================================
 
 if __name__ == "__main__":
-    asyncio.run(
-        main()
+
+    web.run_app(
+        create_app(),
+        host="0.0.0.0",
+        port=PORT
     )
