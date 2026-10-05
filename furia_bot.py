@@ -31,12 +31,33 @@ dp = Dispatcher()
 
 client = OpenAI()
 
-with open("furia_prompt.txt", "r", encoding="utf-8") as f:
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+PROMPT_FILE = os.path.join(
+    BASE_DIR,
+    "furia_prompt.txt"
+)
+
+with open(PROMPT_FILE, "r", encoding="utf-8") as f:
     system_prompt = f.read()
 
 
-MEMORY_FILE = "furia_memory.json"
-VIDEO_CACHE_DIR = "video_cache"
+# На Netrun каталог /data предназначен для постоянных данных.
+# Локально, где /data обычно нет, продолжаем хранить данные рядом с кодом.
+if os.path.isdir("/data"):
+    DATA_DIR = "/data"
+else:
+    DATA_DIR = BASE_DIR
+
+MEMORY_FILE = os.path.join(
+    DATA_DIR,
+    "furia_memory.json"
+)
+
+VIDEO_CACHE_DIR = os.path.join(
+    DATA_DIR,
+    "furia_video_cache"
+)
 
 MAX_HISTORY_MESSAGES = 20
 MAX_SAVED_MEMORIES = 500
@@ -670,7 +691,7 @@ def transcribe_wav_sync(wav_path):
         if transcript:
 
             print(
-                "🗣 Фурия распознал речь:"
+                "🗣 Фурия распознала речь:"
             )
 
             print(transcript)
@@ -926,7 +947,7 @@ async def process_video(video):
                     )
 
             print(
-                f"👀 Фурия увидел кадров "
+                f"👀 Фурия увидела кадров "
                 f"из видео: "
                 f"{len(video_frames)}"
             )
@@ -1131,7 +1152,7 @@ async def process_video(video):
 
 
 # =========================================================
-# ГЕНЕРАЦИЯ КОММЕНТАРИЯ МАРКА
+# ГЕНЕРАЦИЯ КОММЕНТАРИЯ ФУРИИ
 # =========================================================
 
 async def generate_furia_comment(
@@ -1175,7 +1196,7 @@ async def generate_furia_comment(
 История разговора:
 {conversation}
 
-Продолжи этот разговор от лица Фурияа.
+Продолжи этот разговор от лица Фурии.
 
 Учитывай всю историю разговора,
 а не только последнюю реплику.
@@ -1183,7 +1204,7 @@ async def generate_furia_comment(
 Не начинай разговор заново.
 
 Не повторяй мысль,
-которую Фурия уже высказал.
+которую Фурия уже высказала.
 
 Отвечай именно на последнюю
 реплику пользователя
@@ -1209,7 +1230,7 @@ async def generate_furia_comment(
 звуки или события,
 которых нет в доступном контексте.
 
-Напиши только ответ Фурияа.
+Напиши только ответ Фурии.
 """
 
     # -----------------------------------------------------
@@ -1246,7 +1267,7 @@ async def generate_furia_comment(
 кадрам
 или расшифровке.
 
-Напиши один комментарий Фурияа.
+Напиши один комментарий Фурии.
 """
 
     content = [
@@ -1295,7 +1316,11 @@ async def generate_furia_comment(
             }
         )
 
-    response = client.responses.create(
+    # OpenAI-клиент синхронный. В облачной версии Фурия живёт
+    # в одном процессе с другими ботами, поэтому уводим запрос
+    # в отдельный поток и не блокируем общий event loop.
+    response = await asyncio.to_thread(
+        client.responses.create,
         model="gpt-5.6-luna",
         instructions=system_prompt,
         input=[
@@ -1559,7 +1584,7 @@ async def channel_post_handler(
 
 
 # =========================================================
-# ОТВЕТ ПОЛЬЗОВАТЕЛЯ МАРКУ
+# ОТВЕТ ПОЛЬЗОВАТЕЛЯ ФУРИИ
 # =========================================================
 
 @dp.message(
@@ -1820,21 +1845,29 @@ async def reply_to_furia_handler(
 
 
 # =========================================================
-# ЗАПУСК
+# ЖИЗНЕННЫЙ ЦИКЛ МОДУЛЯ
 # =========================================================
 
-async def main():
+async def startup():
+    """
+    Вызывается общим main.py при запуске веб-сервера.
+    Сама Фурия больше не запускает polling.
+    """
 
     print("")
     print(
         "===================================="
     )
     print(
-        "💅 Фурия 1.0 запущена."
+        "💅 Фурия 1.1 загружена."
     )
     print(
         f"💾 Записей в памяти: "
         f"{len(furia_messages)}"
+    )
+    print(
+        f"💽 Каталог данных: "
+        f"{DATA_DIR}"
     )
     print(
         "📸 Зрение: включено."
@@ -1849,12 +1882,17 @@ async def main():
         "⚡ Кэш видео: включён."
     )
     print(
+        "📡 Режим: webhook через общий сервер."
+    )
+    print(
         "===================================="
     )
     print("")
 
-    await dp.start_polling(bot)
 
+async def cleanup():
+    """
+    Вызывается общим main.py при остановке приложения.
+    """
 
-if __name__ == "__main__":
-    asyncio.run(main())
+    await bot.session.close()
