@@ -480,90 +480,12 @@ WEBHOOK_SECRET = hashlib.sha256(
 ).hexdigest()
 
 
-def get_external_base_url(
-    request: web.Request
-):
-
-    # Netrun стоит перед нашим приложением как reverse proxy.
-    # Поэтому настоящий публичный HTTPS-протокол и хост
-    # могут приходить в X-Forwarded-* заголовках.
-
-    forwarded_proto = request.headers.get(
-        "X-Forwarded-Proto",
-        request.scheme
-    )
-
-    forwarded_host = request.headers.get(
-        "X-Forwarded-Host",
-        request.host
-    )
-
-    # Иногда proxy перечисляет несколько значений через запятую.
-    scheme = forwarded_proto.split(",")[0].strip()
-    host = forwarded_host.split(",")[0].strip()
-
-    return f"{scheme}://{host}"
-
-
 async def health_handler(
     request: web.Request
 ):
 
     return web.Response(
-        text=(
-            "Серёга жив. "
-            "Webhook настраивается через /setup-webhook"
-        )
-    )
-
-
-async def setup_webhook_handler(
-    request: web.Request
-):
-
-    base_url = get_external_base_url(
-        request
-    )
-
-    webhook_url = (
-        f"{base_url}{WEBHOOK_PATH}"
-    )
-
-    if not webhook_url.startswith(
-        "https://"
-    ):
-        return web.Response(
-            status=400,
-            text=(
-                "Webhook не настроен: "
-                "нужен публичный HTTPS-адрес. "
-                f"Сейчас получен адрес: {webhook_url}"
-            )
-        )
-
-    await bot.set_webhook(
-        url=webhook_url,
-        secret_token=WEBHOOK_SECRET,
-        allowed_updates=dp.resolve_used_update_types()
-    )
-
-    info = await bot.get_webhook_info()
-
-    print("")
-    print("🔗 WEBHOOK НАСТРОЕН")
-    print(f"🌍 URL: {info.url}")
-    print(
-        f"📬 Ожидают доставки: "
-        f"{info.pending_update_count}"
-    )
-    print("")
-
-    return web.Response(
-        text=(
-            "Готово. Серёга подключён к Telegram через webhook.\n"
-            f"Webhook: {info.url}\n"
-            f"Ожидают доставки: {info.pending_update_count}"
-        )
+        text="Серёга жив."
     )
 
 
@@ -660,11 +582,6 @@ def create_app():
     app.router.add_get(
         "/",
         health_handler
-    )
-
-    app.router.add_get(
-        "/setup-webhook",
-        setup_webhook_handler
     )
 
     app.router.add_post(
