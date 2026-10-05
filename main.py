@@ -10,6 +10,8 @@ from aiogram.filters import CommandStart
 from aiogram.types import Message, Update
 from openai import OpenAI
 
+import furia_bot
+
 
 # =========================================================
 # НАСТРОЙКА
@@ -457,11 +459,9 @@ async def channel_post_handler(
 
 
 # =========================================================
-# WEBHOOK / ВЕБ-СЕРВЕР
+# WEBHOOK / ОБЩИЙ ВЕБ-СЕРВЕР
 # =========================================================
 
-# Netrun сам передаёт порт через переменную PORT.
-# Для локального запуска оставляем запасной порт 8080.
 PORT = int(
     os.getenv(
         "PORT",
@@ -469,39 +469,114 @@ PORT = int(
     )
 )
 
-# Telegram будет присылать обновления сюда.
-WEBHOOK_PATH = "/telegram-webhook"
 
-# Секрет для проверки webhook-запросов.
-# Отдельно хранить его не нужно:
-# он стабильно вычисляется из Telegram-токена.
-WEBHOOK_SECRET = hashlib.sha256(
+# =========================================================
+# МАРШРУТЫ И СЕКРЕТЫ
+# =========================================================
+
+# Старый адрес Серёги сохраняем без изменений.
+SEREGA_WEBHOOK_PATH = "/telegram-webhook"
+
+# Фурия получает отдельный адрес.
+FURIA_WEBHOOK_PATH = "/furia-webhook"
+
+
+SEREGA_WEBHOOK_SECRET = hashlib.sha256(
     TELEGRAM_TOKEN.encode("utf-8")
 ).hexdigest()
 
+FURIA_WEBHOOK_SECRET = hashlib.sha256(
+    furia_bot.telegram_token.encode("utf-8")
+).hexdigest()
+
+
+# =========================================================
+# ФОНОВАЯ ОБРАБОТКА
+# =========================================================
+
+# Telegram должен быстро получить OK.
+# Сам анализ изображения, видео, задержки и ответы
+# продолжаются отдельными asyncio-задачами.
+background_tasks = set()
+
+
+def background_task_finished(
+    task: asyncio.Task
+):
+
+    background_tasks.discard(
+        task
+    )
+
+    try:
+        task.result()
+
+    except asyncio.CancelledError:
+        pass
+
+    except Exception as e:
+
+        print("")
+        print(
+            "❌ ОШИБКА ФОНОВОЙ "
+            "ОБРАБОТКИ UPDATE"
+        )
+        print(
+            type(e).__name__,
+            e
+        )
+        print("")
+
+
+def run_in_background(
+    coroutine
+):
+
+    task = asyncio.create_task(
+        coroutine
+    )
+
+    background_tasks.add(
+        task
+    )
+
+    task.add_done_callback(
+        background_task_finished
+    )
+
+
+# =========================================================
+# HEALTH CHECK
+# =========================================================
 
 async def health_handler(
     request: web.Request
 ):
 
     return web.Response(
-        text="Серёга жив."
+        text="Серёга и Фурия живы."
     )
 
 
-async def telegram_webhook_handler(
+# =========================================================
+# WEBHOOK СЕРЁГИ
+# =========================================================
+
+async def serega_webhook_handler(
     request: web.Request
 ):
 
-    # Проверяем секретный заголовок Telegram.
     received_secret = request.headers.get(
         "X-Telegram-Bot-Api-Secret-Token"
     )
 
-    if received_secret != WEBHOOK_SECRET:
+    if (
+        received_secret
+        != SEREGA_WEBHOOK_SECRET
+    ):
 
         print(
-            "⛔ Отклонён запрос "
+            "⛔ Отклонён запрос Серёги "
             "с неправильным webhook-секретом."
         )
 
@@ -521,9 +596,11 @@ async def telegram_webhook_handler(
             }
         )
 
-        await dp.feed_update(
-            bot,
-            update
+        run_in_background(
+            dp.feed_update(
+                bot,
+                update
+            )
         )
 
         return web.Response(
@@ -534,7 +611,8 @@ async def telegram_webhook_handler(
 
         print("")
         print(
-            "❌ ОШИБКА ПРИ ОБРАБОТКЕ WEBHOOK"
+            "❌ ОШИБКА ПРИ ПРИЁМЕ "
+            "WEBHOOK СЕРЁГИ"
         )
         print(
             type(e).__name__,
@@ -542,14 +620,83 @@ async def telegram_webhook_handler(
         )
         print("")
 
-        # Возвращаем 500, чтобы Telegram понял,
-        # что доставка обновления не удалась
-        # и мог повторить попытку.
         return web.Response(
             status=500,
             text="Error"
         )
 
+
+# =========================================================
+# WEBHOOK ФУРИИ
+# =========================================================
+
+async def furia_webhook_handler(
+    request: web.Request
+):
+
+    received_secret = request.headers.get(
+        "X-Telegram-Bot-Api-Secret-Token"
+    )
+
+    if (
+        received_secret
+        != FURIA_WEBHOOK_SECRET
+    ):
+
+        print(
+            "⛔ Отклонён запрос Фурии "
+            "с неправильным webhook-секретом."
+        )
+
+        return web.Response(
+            status=403,
+            text="Forbidden"
+        )
+
+    try:
+
+        data = await request.json()
+
+        update = Update.model_validate(
+            data,
+            context={
+                "bot": furia_bot.bot
+            }
+        )
+
+        run_in_background(
+            furia_bot.dp.feed_update(
+                furia_bot.bot,
+                update
+            )
+        )
+
+        return web.Response(
+            text="OK"
+        )
+
+    except Exception as e:
+
+        print("")
+        print(
+            "❌ ОШИБКА ПРИ ПРИЁМЕ "
+            "WEBHOOK ФУРИИ"
+        )
+        print(
+            type(e).__name__,
+            e
+        )
+        print("")
+
+        return web.Response(
+            status=500,
+            text="Error"
+        )
+
+
+# =========================================================
+# ЗАПУСК / ОСТАНОВКА ОБЩЕГО ПРИЛОЖЕНИЯ
+# =========================================================
 
 async def on_startup(
     app: web.Application
@@ -557,22 +704,51 @@ async def on_startup(
 
     print("")
     print("=" * 50)
-    print("👨 Серёга 1.1 запущен.")
-    print("🌐 Режим: webhook.")
-    print("🖼 Анализ изображений: включён.")
-    print("📚 Альбомы: каждое изображение.")
-    print("🎯 Вероятность реакции: 100%.")
-    print("📝 Подписи постов: игнорируются.")
-    print(f"🚪 Порт: {PORT}")
+    print(
+        "🏠 Общий хост ботов запущен."
+    )
+    print(
+        "🌐 Режим: webhook."
+    )
+    print(
+        f"🚪 Порт: {PORT}"
+    )
+    print("")
+    print(
+        f"👨 Серёга: "
+        f"{SEREGA_WEBHOOK_PATH}"
+    )
+    print(
+        f"💅 Фурия: "
+        f"{FURIA_WEBHOOK_PATH}"
+    )
     print("=" * 50)
     print("")
+
+    await furia_bot.startup()
 
 
 async def on_cleanup(
     app: web.Application
 ):
 
+    tasks = list(
+        background_tasks
+    )
+
+    for task in tasks:
+        task.cancel()
+
+    if tasks:
+
+        await asyncio.gather(
+            *tasks,
+            return_exceptions=True
+        )
+
     await bot.session.close()
+
+    await furia_bot.cleanup()
 
 
 def create_app():
@@ -585,8 +761,13 @@ def create_app():
     )
 
     app.router.add_post(
-        WEBHOOK_PATH,
-        telegram_webhook_handler
+        SEREGA_WEBHOOK_PATH,
+        serega_webhook_handler
+    )
+
+    app.router.add_post(
+        FURIA_WEBHOOK_PATH,
+        furia_webhook_handler
     )
 
     app.on_startup.append(
