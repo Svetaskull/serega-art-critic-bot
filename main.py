@@ -11,6 +11,7 @@ from aiogram.types import Message, Update
 from openai import OpenAI
 
 import furia_bot
+import mark_bot
 
 
 # =========================================================
@@ -480,6 +481,9 @@ SEREGA_WEBHOOK_PATH = "/telegram-webhook"
 # Фурия получает отдельный адрес.
 FURIA_WEBHOOK_PATH = "/furia-webhook"
 
+# Марк получает третий отдельный адрес.
+MARK_WEBHOOK_PATH = "/mark-webhook"
+
 
 SEREGA_WEBHOOK_SECRET = hashlib.sha256(
     TELEGRAM_TOKEN.encode("utf-8")
@@ -487,6 +491,10 @@ SEREGA_WEBHOOK_SECRET = hashlib.sha256(
 
 FURIA_WEBHOOK_SECRET = hashlib.sha256(
     furia_bot.telegram_token.encode("utf-8")
+).hexdigest()
+
+MARK_WEBHOOK_SECRET = hashlib.sha256(
+    mark_bot.telegram_token.encode("utf-8")
 ).hexdigest()
 
 
@@ -554,7 +562,7 @@ async def health_handler(
 ):
 
     return web.Response(
-        text="Серёга и Фурия живы."
+        text="Серёга, Фурия и Марк живы."
     )
 
 
@@ -695,6 +703,49 @@ async def furia_webhook_handler(
 
 
 # =========================================================
+# WEBHOOK МАРКА
+# =========================================================
+
+async def mark_webhook_handler(
+    request: web.Request
+):
+
+    received_secret = request.headers.get(
+        "X-Telegram-Bot-Api-Secret-Token"
+    )
+
+    if received_secret != MARK_WEBHOOK_SECRET:
+        print(
+            "⛔ Отклонён запрос Марка "
+            "с неправильным webhook-секретом."
+        )
+        return web.Response(status=403, text="Forbidden")
+
+    try:
+        data = await request.json()
+        update = Update.model_validate(
+            data,
+            context={"bot": mark_bot.bot}
+        )
+
+        run_in_background(
+            mark_bot.dp.feed_update(
+                mark_bot.bot,
+                update
+            )
+        )
+
+        return web.Response(text="OK")
+
+    except Exception as e:
+        print("")
+        print("❌ ОШИБКА ПРИ ПРИЁМЕ WEBHOOK МАРКА")
+        print(type(e).__name__, e)
+        print("")
+        return web.Response(status=500, text="Error")
+
+
+# =========================================================
 # ЗАПУСК / ОСТАНОВКА ОБЩЕГО ПРИЛОЖЕНИЯ
 # =========================================================
 
@@ -722,10 +773,15 @@ async def on_startup(
         f"💅 Фурия: "
         f"{FURIA_WEBHOOK_PATH}"
     )
+    print(
+        f"🧠 Марк: "
+        f"{MARK_WEBHOOK_PATH}"
+    )
     print("=" * 50)
     print("")
 
     await furia_bot.startup()
+    await mark_bot.startup()
 
 
 async def on_cleanup(
@@ -749,6 +805,7 @@ async def on_cleanup(
     await bot.session.close()
 
     await furia_bot.cleanup()
+    await mark_bot.cleanup()
 
 
 def create_app():
@@ -768,6 +825,11 @@ def create_app():
     app.router.add_post(
         FURIA_WEBHOOK_PATH,
         furia_webhook_handler
+    )
+
+    app.router.add_post(
+        MARK_WEBHOOK_PATH,
+        mark_webhook_handler
     )
 
     app.on_startup.append(
