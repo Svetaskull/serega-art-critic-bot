@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Frankenstein Lab · v0.4</title>
+    <style>
+        :root { color-scheme: dark; font-family: Arial, sans-serif; }
+        * { box-sizing: border-box; }
+        body { background: #111318; color: #f2f2f2; margin: 0; padding: 32px; }
+        main { max-width: 1250px; margin: 0 auto; }
+        h1 { font-size: clamp(26px, 3vw, 38px); margin: 0 0 10px; }
+        h2 { font-size: 23px; margin: 0 0 16px; }
+        p { line-height: 1.5; }
+        .subtitle { color: #aab3c3; margin: 0 0 22px; }
+        .notice { padding: 13px 16px; border: 1px solid #4b4030; background: #282319; border-radius: 12px; color: #e9c78e; margin: 18px 0 24px; font-size: 14px; }
+        .header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; }
+        .badge { color: #72d69d; background: #183328; padding: 8px 12px; border-radius: 30px; font-size: 13px; }
+        .badge.error { color: #ff9e9e; background: #3c2525; }
+        .bots { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+        .bot-card { background: #1b1e25; border: 1px solid #30343d; border-radius: 18px; padding: 22px; min-width: 0; }
+        .muted { color: #aab3c3; font-size: 14px; }
+        .setting { border-top: 1px solid #30343d; padding-top: 17px; margin-top: 17px; }
+        .setting-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: 14px; }
+        output { font-size: 21px; font-weight: bold; color: #8ce2b0; font-variant-numeric: tabular-nums; }
+        input[type="range"] { display: block; width: 100%; margin: 15px 0 5px; accent-color: #71d89a; cursor: pointer; }
+        input:disabled { opacity: .45; cursor: not-allowed; }
+        .save-status { color: #aab3c3; font-size: 13px; min-height: 19px; margin-top: 20px; }
+        .save-status.ok { color: #71d89a; }
+        .save-status.bad { color: #ff8b8b; }
+        .tiny { font-size: 12px; color: #8d98aa; }
+        @media (max-width: 950px) { .bots { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+<main>
+    <div class="header">
+        <h1>🧪 Лаборатория Франкенштейна</h1>
+        <span id="lab-status" class="badge">Подключение...</span>
+    </div>
+    <p class="subtitle">Центр управления электронными долбоёбами.</p>
+    <div class="notice">⚠️ Учебная локальная панель. Настройки сохраняются на этом компьютере, но пока НЕ влияют на настоящих ботов в Telegram.</div>
+
+    <section class="bots">
+        <article class="bot-card">
+            <h2>👨 Серёга</h2>
+            <p class="muted">Статус бота: не проверялся</p>
+            <p>Режим: художественный душнила</p>
+            <p class="tiny">Серёга комментирует изображения без вероятности и задержки. Его пока не трогаем.</p>
+        </article>
+
+        <article class="bot-card" data-bot="furia">
+            <h2>💅 Фурия</h2>
+            <p class="muted">Статус бота: не проверялся</p>
+            <div class="setting">
+                <div class="setting-head"><label for="furia-probability">Вероятность ответа</label><output id="furia-probability-value">—</output></div>
+                <input id="furia-probability" type="range" min="0" max="100" step="1" disabled>
+            </div>
+            <div class="setting">
+                <div class="setting-head"><label for="furia-delay-min">Минимальная задержка</label><output id="furia-delay-min-value">—</output></div>
+                <input id="furia-delay-min" type="range" min="0" max="300" step="5" disabled>
+                <div class="setting-head"><label for="furia-delay-max">Максимальная задержка</label><output id="furia-delay-max-value">—</output></div>
+                <input id="furia-delay-max" type="range" min="0" max="300" step="5" disabled>
+            </div>
+            <p class="save-status" id="furia-save-status">Загрузка настроек...</p>
+        </article>
+
+        <article class="bot-card" data-bot="mark">
+            <h2>🧠 Марк</h2>
+            <p class="muted">Статус бота: не проверялся</p>
+            <div class="setting">
+                <div class="setting-head"><label for="mark-probability">Вероятность ответа</label><output id="mark-probability-value">—</output></div>
+                <input id="mark-probability" type="range" min="0" max="100" step="1" disabled>
+            </div>
+            <div class="setting">
+                <div class="setting-head"><label for="mark-delay-min">Минимальная задержка</label><output id="mark-delay-min-value">—</output></div>
+                <input id="mark-delay-min" type="range" min="0" max="300" step="5" disabled>
+                <div class="setting-head"><label for="mark-delay-max">Максимальная задержка</label><output id="mark-delay-max-value">—</output></div>
+                <input id="mark-delay-max" type="range" min="0" max="300" step="5" disabled>
+            </div>
+            <p class="save-status" id="mark-save-status">Загрузка настроек...</p>
+        </article>
+    </section>
+</main>
+<script>
+    const bots = ["furia", "mark"];
+    const fields = ["probability", "delay_min", "delay_max"];
+    const saved = {};
+    const get = (id) => document.getElementById(id);
+
+    function show(bot) {
+        for (const field of fields) {
+            const slider = get(`${bot}-${field.replaceAll("_", "-")}`);
+            get(`${slider.id}-value`).textContent = slider.value + (field === "probability" ? "%" : " сек");
+        }
+    }
+
+    function apply(bot, values) {
+        for (const field of fields) {
+            get(`${bot}-${field.replaceAll("_", "-")}`).value = values[field];
+        }
+        show(bot);
+    }
+
+    function enabled(bot, yes) {
+        for (const field of fields) {
+            get(`${bot}-${field.replaceAll("_", "-")}`).disabled = !yes;
+        }
+    }
+
+    function message(bot, text, kind = "") {
+        const element = get(`${bot}-save-status`);
+        element.textContent = text;
+        element.className = `save-status ${kind}`;
+    }
+
+    async function save(bot) {
+        enabled(bot, false);
+        message(bot, "⏳ Сохраняем на диск...");
+        const values = {};
+        for (const field of fields) {
+            values[field] = Number(get(`${bot}-${field.replaceAll("_", "-")}`).value);
+        }
+        try {
+            const response = await fetch("/api/settings", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ bot, ...values })
+            });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const result = await response.json();
+            if (!result.success) throw new Error("Сервер не подтвердил сохранение");
+            saved[bot] = values;
+            message(bot, "✓ Сохранено на диск", "ok");
+        } catch (error) {
+            apply(bot, saved[bot]);
+            message(bot, "✕ Ошибка сохранения. Возвращено прежнее значение", "bad");
+            console.error(error);
+        } finally {
+            enabled(bot, true);
+        }
+    }
+
+    for (const bot of bots) {
+        for (const field of fields) {
+            const slider = get(`${bot}-${field.replaceAll("_", "-")}`);
+            slider.addEventListener("input", () => {
+                if (field === "delay_min") {
+                    const max = get(`${bot}-delay-max`);
+                    if (Number(slider.value) > Number(max.value)) max.value = slider.value;
+                }
+                if (field === "delay_max") {
+                    const min = get(`${bot}-delay-min`);
+                    if (Number(slider.value) < Number(min.value)) min.value = slider.value;
+                }
+                show(bot);
+                message(bot, "Изменено — отпусти ползунок для сохранения");
+            });
+            slider.addEventListener("change", () => save(bot));
+        }
+    }
+
+    async function load() {
+        try {
+            const response = await fetch("/api/status", { cache: "no-store" });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const data = await response.json();
+            get("lab-status").textContent = `● Лаборатория online · v${data.version}`;
+            for (const bot of bots) {
+                saved[bot] = {
+                    probability: data.bots[bot].probability,
+                    delay_min: data.bots[bot].delay_min,
+                    delay_max: data.bots[bot].delay_max
+                };
+                apply(bot, saved[bot]);
+                enabled(bot, true);
+                message(bot, "Настройки загружены");
+            }
+        } catch (error) {
+            get("lab-status").textContent = "● Нет связи с Python";
+            get("lab-status").classList.add("error");
+            console.error(error);
+        }
+    }
+    load();
+</script>
+</body>
+</html>
