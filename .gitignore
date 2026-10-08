@@ -4,3 +4,5 @@ __pycache__/
 .env
 .venv/
 .vscode/
+lab_settings.json
+lab_settings.json.tmp

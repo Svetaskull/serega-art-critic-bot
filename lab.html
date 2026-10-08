@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Frankenstein Lab · v0.4</title>
+    <title>Frankenstein Lab · v0.5</title>
     <style>
         :root { color-scheme: dark; font-family: Arial, sans-serif; }
         * { box-sizing: border-box; }
@@ -17,6 +17,8 @@
         .header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; }
         .badge { color: #72d69d; background: #183328; padding: 8px 12px; border-radius: 30px; font-size: 13px; }
         .badge.error { color: #ff9e9e; background: #3c2525; }
+        .logout { border: 1px solid #586171; background: #22262e; color: #f2f2f2; border-radius: 12px; padding: 9px 13px; cursor: pointer; }
+        .header-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
         .bots { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
         .bot-card { background: #1b1e25; border: 1px solid #30343d; border-radius: 18px; padding: 22px; min-width: 0; }
         .muted { color: #aab3c3; font-size: 14px; }
@@ -36,22 +38,22 @@
 <main>
     <div class="header">
         <h1>🧪 Лаборатория Франкенштейна</h1>
-        <span id="lab-status" class="badge">Подключение...</span>
+        <div class="header-actions"><span id="lab-status" class="badge">Подключение...</span><button class="logout" id="logout" type="button">Выйти</button></div>
     </div>
     <p class="subtitle">Центр управления электронными долбоёбами.</p>
-    <div class="notice">⚠️ Учебная локальная панель. Настройки сохраняются на этом компьютере, но пока НЕ влияют на настоящих ботов в Telegram.</div>
+    <div class="notice">⚡ Облачная лаборатория. Изменения применяются к новым постам Фурии и Марка. Ответы в уже начатых разговорах работают независимо от вероятности. Статус означает работу общего сервера, а не проверку Telegram API.</div>
 
     <section class="bots">
         <article class="bot-card">
             <h2>👨 Серёга</h2>
-            <p class="muted">Статус бота: не проверялся</p>
+            <p class="muted">Статус: загрузка...</p>
             <p>Режим: художественный душнила</p>
-            <p class="tiny">Серёга комментирует изображения без вероятности и задержки. Его пока не трогаем.</p>
+            <p class="tiny">Серёга комментирует изображения без вероятности и задержки. Его не трогаем.</p>
         </article>
 
         <article class="bot-card" data-bot="furia">
             <h2>💅 Фурия</h2>
-            <p class="muted">Статус бота: не проверялся</p>
+            <p class="muted">Статус: загрузка...</p>
             <div class="setting">
                 <div class="setting-head"><label for="furia-probability">Вероятность ответа</label><output id="furia-probability-value">—</output></div>
                 <input id="furia-probability" type="range" min="0" max="100" step="1" disabled>
@@ -67,7 +69,7 @@
 
         <article class="bot-card" data-bot="mark">
             <h2>🧠 Марк</h2>
-            <p class="muted">Статус бота: не проверялся</p>
+            <p class="muted">Статус: загрузка...</p>
             <div class="setting">
                 <div class="setting-head"><label for="mark-probability">Вероятность ответа</label><output id="mark-probability-value">—</output></div>
                 <input id="mark-probability" type="range" min="0" max="100" step="1" disabled>
@@ -86,6 +88,7 @@
     const bots = ["furia", "mark"];
     const fields = ["probability", "delay_min", "delay_max"];
     const saved = {};
+    let csrf = "";
     const get = (id) => document.getElementById(id);
 
     function show(bot) {
@@ -116,22 +119,23 @@
 
     async function save(bot) {
         enabled(bot, false);
-        message(bot, "⏳ Сохраняем на диск...");
+        message(bot, "⏳ Сохраняем в облаке...");
         const values = {};
         for (const field of fields) {
             values[field] = Number(get(`${bot}-${field.replaceAll("_", "-")}`).value);
         }
         try {
-            const response = await fetch("/api/settings", {
+            const response = await fetch("/lab/api/settings", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
                 body: JSON.stringify({ bot, ...values })
             });
+            if (response.status === 401) { location.assign("/lab/"); return; }
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const result = await response.json();
             if (!result.success) throw new Error("Сервер не подтвердил сохранение");
             saved[bot] = values;
-            message(bot, "✓ Сохранено на диск", "ok");
+            message(bot, "✓ Сохранено в облаке · действует для новых постов", "ok");
         } catch (error) {
             apply(bot, saved[bot]);
             message(bot, "✕ Ошибка сохранения. Возвращено прежнее значение", "bad");
@@ -162,9 +166,15 @@
 
     async function load() {
         try {
-            const response = await fetch("/api/status", { cache: "no-store" });
+            const response = await fetch("/lab/api/status", { cache: "no-store" });
+            if (response.status === 401) { location.assign("/lab/"); return; }
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const data = await response.json();
+            csrf = data.csrf;
+            for (const name of ["serega", "furia", "mark"]) {
+                const card = name === "serega" ? document.querySelector(".bot-card") : document.querySelector(`[data-bot="${name}"]`);
+                card.querySelector(".muted").textContent = `Статус: ${data.bots[name].status}`;
+            }
             get("lab-status").textContent = `● Лаборатория online · v${data.version}`;
             for (const bot of bots) {
                 saved[bot] = {
@@ -182,6 +192,11 @@
             console.error(error);
         }
     }
+    get("logout").addEventListener("click", async () => {
+        try {
+            await fetch("/lab/logout", { method: "POST", headers: { "X-CSRF-Token": csrf } });
+        } finally { location.assign("/lab/"); }
+    });
     load();
 </script>
 </body>
