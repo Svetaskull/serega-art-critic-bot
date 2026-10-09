@@ -9,6 +9,8 @@ import subprocess
 import cv2
 import imageio_ffmpeg
 
+from lab_control import get_bot_settings
+
 from aiogram import Bot, Dispatcher
 from aiogram.filters import CommandStart
 from aiogram.types import Message
@@ -1383,7 +1385,9 @@ async def channel_post_handler(
     # 70% ВЕРОЯТНОСТЬ
     # -----------------------------------------------------
 
-    if random.random() > 0.7:
+    probability, delay_min, delay_max = get_bot_settings("furia")
+
+    if random.random() > probability:
 
         print(
             "😴 Фурия решил промолчать."
@@ -1496,10 +1500,7 @@ async def channel_post_handler(
     # ЗАДЕРЖКА
     # -----------------------------------------------------
 
-    delay = random.randint(
-        20,
-        120
-    )
+    delay = random.randint(delay_min, delay_max)
 
     print(
         f"⏳ Фурия ответит "

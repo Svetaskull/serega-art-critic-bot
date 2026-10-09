@@ -12,6 +12,7 @@ from openai import OpenAI
 
 import furia_bot
 import mark_bot
+import lab_control
 
 
 # =========================================================
@@ -831,6 +832,9 @@ def create_app():
         MARK_WEBHOOK_PATH,
         mark_webhook_handler
     )
+
+    # Парольная лаборатория подключается к тому же серверу.
+    lab_control.register_routes(app)
 
     app.on_startup.append(
         on_startup
