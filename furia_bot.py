@@ -9,7 +9,7 @@ import subprocess
 import cv2
 import imageio_ffmpeg
 
-from lab_control import get_bot_settings
+from lab_control import get_bot_settings, get_bot_enabled, record_event
 
 from aiogram import Bot, Dispatcher
 from aiogram.filters import CommandStart
@@ -1343,9 +1343,13 @@ async def generate_furia_comment(
 @dp.message(CommandStart())
 async def start_handler(message: Message):
 
+    if not get_bot_enabled('furia'):
+        return
+
     await message.answer(
         "Фурия на месте. Кто тут опять хуйнёй занимается?"
     )
+    record_event('furia', 'sent')
 
 
 # =========================================================
@@ -1359,6 +1363,10 @@ async def start_handler(message: Message):
 async def channel_post_handler(
     message: Message
 ):
+
+    if not get_bot_enabled('furia'):
+        record_event('furia', 'skipped')
+        return
 
     post = (
         message.text
@@ -1388,6 +1396,7 @@ async def channel_post_handler(
     probability, delay_min, delay_max = get_bot_settings("furia")
 
     if random.random() > probability:
+        record_event('furia', 'skipped')
 
         print(
             "😴 Фурия решил промолчать."
@@ -1489,6 +1498,7 @@ async def channel_post_handler(
         )
 
     except Exception as e:
+        record_event('furia', 'errors')
 
         print("❌ Ошибка OpenAI:")
         print(type(e).__name__)
@@ -1515,6 +1525,10 @@ async def channel_post_handler(
     # ОТПРАВКА
     # -----------------------------------------------------
 
+    if not get_bot_enabled('furia'):
+        record_event('furia', 'skipped')
+        return
+
     try:
 
         sent_message = (
@@ -1522,8 +1536,10 @@ async def channel_post_handler(
                 comment
             )
         )
+        record_event('furia', 'sent')
 
     except Exception as e:
+        record_event('furia', 'errors')
 
         print(
             "❌ Не удалось "
@@ -1596,6 +1612,10 @@ async def channel_post_handler(
 async def reply_to_furia_handler(
     message: Message
 ):
+
+    if not get_bot_enabled('furia'):
+        record_event('furia', 'skipped')
+        return
 
     replied_message = (
         message.reply_to_message
@@ -1751,6 +1771,7 @@ async def reply_to_furia_handler(
         )
 
     except Exception as e:
+        record_event('furia', 'errors')
 
         print("❌ Ошибка OpenAI:")
         print(type(e).__name__)
@@ -1769,6 +1790,10 @@ async def reply_to_furia_handler(
     # ОТПРАВКА
     # -----------------------------------------------------
 
+    if not get_bot_enabled('furia'):
+        record_event('furia', 'skipped')
+        return
+
     try:
 
         sent_message = (
@@ -1776,8 +1801,10 @@ async def reply_to_furia_handler(
                 answer
             )
         )
+        record_event('furia', 'sent')
 
     except Exception as e:
+        record_event('furia', 'errors')
 
         print(
             "❌ Не удалось "

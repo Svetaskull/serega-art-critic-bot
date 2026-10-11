@@ -1,203 +1,55 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Frankenstein Lab · v0.5</title>
-    <style>
-        :root { color-scheme: dark; font-family: Arial, sans-serif; }
-        * { box-sizing: border-box; }
-        body { background: #111318; color: #f2f2f2; margin: 0; padding: 32px; }
-        main { max-width: 1250px; margin: 0 auto; }
-        h1 { font-size: clamp(26px, 3vw, 38px); margin: 0 0 10px; }
-        h2 { font-size: 23px; margin: 0 0 16px; }
-        p { line-height: 1.5; }
-        .subtitle { color: #aab3c3; margin: 0 0 22px; }
-        .notice { padding: 13px 16px; border: 1px solid #4b4030; background: #282319; border-radius: 12px; color: #e9c78e; margin: 18px 0 24px; font-size: 14px; }
-        .header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; }
-        .badge { color: #72d69d; background: #183328; padding: 8px 12px; border-radius: 30px; font-size: 13px; }
-        .badge.error { color: #ff9e9e; background: #3c2525; }
-        .logout { border: 1px solid #586171; background: #22262e; color: #f2f2f2; border-radius: 12px; padding: 9px 13px; cursor: pointer; }
-        .header-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-        .bots { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
-        .bot-card { background: #1b1e25; border: 1px solid #30343d; border-radius: 18px; padding: 22px; min-width: 0; }
-        .muted { color: #aab3c3; font-size: 14px; }
-        .setting { border-top: 1px solid #30343d; padding-top: 17px; margin-top: 17px; }
-        .setting-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: 14px; }
-        output { font-size: 21px; font-weight: bold; color: #8ce2b0; font-variant-numeric: tabular-nums; }
-        input[type="range"] { display: block; width: 100%; margin: 15px 0 5px; accent-color: #71d89a; cursor: pointer; }
-        input:disabled { opacity: .45; cursor: not-allowed; }
-        .save-status { color: #aab3c3; font-size: 13px; min-height: 19px; margin-top: 20px; }
-        .save-status.ok { color: #71d89a; }
-        .save-status.bad { color: #ff8b8b; }
-        .tiny { font-size: 12px; color: #8d98aa; }
-        @media (max-width: 950px) { .bots { grid-template-columns: 1fr; } }
-    </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Frankenstein Lab · v0.6</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,-apple-system,'Segoe UI',Arial,sans-serif;background:#101218;color:#f3f5f8}
+*{box-sizing:border-box}body{margin:0;padding:28px 20px 60px}main{max-width:1200px;margin:auto}
+.header{display:flex;justify-content:space-between;align-items:center;gap:18px;flex-wrap:wrap}h1{font-size:clamp(26px,3.5vw,39px);letter-spacing:-.03em;margin:0 0 8px}h2{font-size:22px;margin:0 0 5px}h3{font-size:19px;margin:0}.subtitle{color:#aeb7c5;margin:0 0 25px}
+.actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.badge{font-size:13px;background:#18382a;color:#88e5ac;border-radius:999px;padding:9px 13px}.badge.bad{background:#432529;color:#ff9c9c}.logout{background:#232732;color:#f5f5f5;border:1px solid #505967;border-radius:10px;padding:9px 14px;cursor:pointer}
+.notice{background:#252218;border:1px solid #51452b;border-radius:13px;color:#edc990;padding:13px 16px;margin-bottom:22px;font-size:13px;line-height:1.6}
+.bots{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.card{background:#1b1e26;border:1px solid #313641;border-radius:18px;padding:21px;min-width:0}.card.off{border-color:#544044}.top{display:flex;align-items:center;justify-content:space-between;gap:12px}.switch{position:relative;display:inline-flex;align-items:center;gap:9px;cursor:pointer;white-space:nowrap;font-size:13px;color:#bfc8d5}.switch input{position:absolute;opacity:0;width:1px;height:1px}.track{display:inline-block;position:relative;width:47px;height:27px;border-radius:99px;background:#5d606b;transition:background .2s}.track:after{content:'';position:absolute;width:21px;height:21px;border-radius:50%;background:white;top:3px;left:3px;transition:transform .2s}.switch input:checked+.track{background:#58c78a}.switch input:checked+.track:after{transform:translateX(20px)}.switch input:focus-visible+.track{outline:3px solid #b7f2d0;outline-offset:3px}.switch input:disabled+.track{opacity:.5}
+.muted{color:#aab3c3;font-size:13px;line-height:1.6}.state{margin:12px 0 0;font-weight:650;color:#83dda6}.state.off{color:#f0a4a4}.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:17px}.stat{background:#141720;border-radius:10px;padding:10px 6px;text-align:center}.stat strong{display:block;font-size:21px;font-variant-numeric:tabular-nums}.stat span{font-size:11px;color:#9da9ba}.setting{border-top:1px solid #30343d;margin-top:18px;padding-top:17px}.setting-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:13px}.setting output{font-size:19px;color:#8de7b3;font-weight:700;font-variant-numeric:tabular-nums}.setting input[type=range]{display:block;width:100%;margin:14px 0 7px;accent-color:#71d89a}.setting input:disabled{opacity:.45}.save-status{color:#aab3c3;font-size:12px;min-height:18px;margin:16px 0 0}.save-status.ok{color:#82e1a9}.save-status.bad{color:#ffa0a0}.card-note{font-size:13px;line-height:1.6;color:#aeb7c5;margin-top:20px}
+.log{margin-top:22px;background:#1b1e26;border:1px solid #313641;border-radius:18px;padding:21px}.log-head{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}.events{list-style:none;margin:17px 0 0;padding:0;max-height:410px;overflow:auto}.events li{display:grid;grid-template-columns:145px 100px 1fr;gap:12px;align-items:center;padding:11px 2px;border-top:1px solid #2c3039;font-size:13px}.events time{color:#98a5b6}.events .who{font-weight:650}.events .kind{color:#c9d1dd}.events .kind.errors{color:#ff9999}.events .kind.sent{color:#84dfa7}.small{color:#97a4b5;font-size:12px;line-height:1.5}.error-line{color:#ff9c9c;font-size:13px;min-height:18px}
+@media(max-width:960px){.bots{grid-template-columns:1fr}.events li{grid-template-columns:120px 65px 1fr;gap:8px}}
+@media(max-width:500px){body{padding:20px 12px 45px}.card,.log{padding:16px}.events li{grid-template-columns:1fr 1fr;gap:2px}.events .kind{grid-column:1/-1;padding-bottom:3px}}
+</style>
 </head>
-<body>
-<main>
-    <div class="header">
-        <h1>🧪 Лаборатория Франкенштейна</h1>
-        <div class="header-actions"><span id="lab-status" class="badge">Подключение...</span><button class="logout" id="logout" type="button">Выйти</button></div>
-    </div>
-    <p class="subtitle">Центр управления электронными долбоёбами.</p>
-    <div class="notice">⚡ Облачная лаборатория. Изменения применяются к новым постам Фурии и Марка. Ответы в уже начатых разговорах работают независимо от вероятности. Статус означает работу общего сервера, а не проверку Telegram API.</div>
-
-    <section class="bots">
-        <article class="bot-card">
-            <h2>👨 Серёга</h2>
-            <p class="muted">Статус: загрузка...</p>
-            <p>Режим: художественный душнила</p>
-            <p class="tiny">Серёга комментирует изображения без вероятности и задержки. Его не трогаем.</p>
-        </article>
-
-        <article class="bot-card" data-bot="furia">
-            <h2>💅 Фурия</h2>
-            <p class="muted">Статус: загрузка...</p>
-            <div class="setting">
-                <div class="setting-head"><label for="furia-probability">Вероятность ответа</label><output id="furia-probability-value">—</output></div>
-                <input id="furia-probability" type="range" min="0" max="100" step="1" disabled>
-            </div>
-            <div class="setting">
-                <div class="setting-head"><label for="furia-delay-min">Минимальная задержка</label><output id="furia-delay-min-value">—</output></div>
-                <input id="furia-delay-min" type="range" min="0" max="300" step="5" disabled>
-                <div class="setting-head"><label for="furia-delay-max">Максимальная задержка</label><output id="furia-delay-max-value">—</output></div>
-                <input id="furia-delay-max" type="range" min="0" max="300" step="5" disabled>
-            </div>
-            <p class="save-status" id="furia-save-status">Загрузка настроек...</p>
-        </article>
-
-        <article class="bot-card" data-bot="mark">
-            <h2>🧠 Марк</h2>
-            <p class="muted">Статус: загрузка...</p>
-            <div class="setting">
-                <div class="setting-head"><label for="mark-probability">Вероятность ответа</label><output id="mark-probability-value">—</output></div>
-                <input id="mark-probability" type="range" min="0" max="100" step="1" disabled>
-            </div>
-            <div class="setting">
-                <div class="setting-head"><label for="mark-delay-min">Минимальная задержка</label><output id="mark-delay-min-value">—</output></div>
-                <input id="mark-delay-min" type="range" min="0" max="300" step="5" disabled>
-                <div class="setting-head"><label for="mark-delay-max">Максимальная задержка</label><output id="mark-delay-max-value">—</output></div>
-                <input id="mark-delay-max" type="range" min="0" max="300" step="5" disabled>
-            </div>
-            <p class="save-status" id="mark-save-status">Загрузка настроек...</p>
-        </article>
-    </section>
+<body><main>
+<div class="header"><div><h1>🧪 Лаборатория Франкенштейна</h1><p class="subtitle">Центр управления электронными долбоёбами · v0.6</p></div>
+<div class="actions"><span id="lab-status" class="badge">Подключаемся...</span><button id="logout" class="logout" type="button">Выйти</button></div></div>
+<div class="notice">⚡ Переключатель «ВЫКЛ» запрещает боту отправлять новые ответы, включая продолжение разговоров. Уже отправленные сообщения не удаляются. Статистика показывает события, полученные этим процессом с момента его запуска; она не проверяет доступность Telegram API. После перезапуска Netrun журнал обнуляется.</div>
+<div class="bots">
+<article class="card" data-bot="serega"><div class="top"><h2>👨 Серёга</h2><label class="switch"><input type="checkbox" id="serega-power" disabled aria-label="Включить Серёгу"><span class="track"></span><span class="power-label">...</span></label></div><p class="state">Загрузка...</p><p class="muted activity">Последний запрос: —</p><div class="stats"><div class="stat"><strong data-stat="received">0</strong><span>Запросов</span></div><div class="stat"><strong data-stat="sent">0</strong><span>Ответов</span></div><div class="stat"><strong data-stat="errors">0</strong><span>Ошибок</span></div></div><p class="card-note">Художественный душнила. Анализирует изображения из канала.</p><p class="save-status" id="serega-save-status"></p></article>
+<article class="card" data-bot="furia"><div class="top"><h2>💅 Фурия</h2><label class="switch"><input type="checkbox" id="furia-power" disabled aria-label="Включить Фурию"><span class="track"></span><span class="power-label">...</span></label></div><p class="state">Загрузка...</p><p class="muted activity">Последний запрос: —</p><div class="stats"><div class="stat"><strong data-stat="received">0</strong><span>Запросов</span></div><div class="stat"><strong data-stat="sent">0</strong><span>Ответов</span></div><div class="stat"><strong data-stat="errors">0</strong><span>Ошибок</span></div></div>
+<div class="setting"><div class="setting-head"><label for="furia-probability">Вероятность ответа на пост</label><output id="furia-probability-value">—</output></div><input id="furia-probability" type="range" min="0" max="100" step="1" disabled></div>
+<div class="setting"><div class="setting-head"><label for="furia-delay-min">Минимальная задержка</label><output id="furia-delay-min-value">—</output></div><input id="furia-delay-min" type="range" min="0" max="300" step="5" disabled><div class="setting-head"><label for="furia-delay-max">Максимальная задержка</label><output id="furia-delay-max-value">—</output></div><input id="furia-delay-max" type="range" min="0" max="300" step="5" disabled></div><p class="save-status" id="furia-save-status"></p></article>
+<article class="card" data-bot="mark"><div class="top"><h2>🧠 Марк</h2><label class="switch"><input type="checkbox" id="mark-power" disabled aria-label="Включить Марка"><span class="track"></span><span class="power-label">...</span></label></div><p class="state">Загрузка...</p><p class="muted activity">Последний запрос: —</p><div class="stats"><div class="stat"><strong data-stat="received">0</strong><span>Запросов</span></div><div class="stat"><strong data-stat="sent">0</strong><span>Ответов</span></div><div class="stat"><strong data-stat="errors">0</strong><span>Ошибок</span></div></div>
+<div class="setting"><div class="setting-head"><label for="mark-probability">Вероятность ответа на пост</label><output id="mark-probability-value">—</output></div><input id="mark-probability" type="range" min="0" max="100" step="1" disabled></div>
+<div class="setting"><div class="setting-head"><label for="mark-delay-min">Минимальная задержка</label><output id="mark-delay-min-value">—</output></div><input id="mark-delay-min" type="range" min="0" max="300" step="5" disabled><div class="setting-head"><label for="mark-delay-max">Максимальная задержка</label><output id="mark-delay-max-value">—</output></div><input id="mark-delay-max" type="range" min="0" max="300" step="5" disabled></div><p class="save-status" id="mark-save-status"></p></article>
+</div>
+<section class="log"><div class="log-head"><h3>📋 Журнал активности</h3><span class="small">Последние 50 событий · обновление каждые 15 секунд</span></div><p class="small">Только тип события, бот и время. Тексты сообщений, имена и ID пользователей не сохраняются.</p><p class="error-line" id="connection-error"></p><ul class="events" id="events"><li>Ожидаем события...</li></ul></section>
 </main>
 <script>
-    const bots = ["furia", "mark"];
-    const fields = ["probability", "delay_min", "delay_max"];
-    const saved = {};
-    let csrf = "";
-    const get = (id) => document.getElementById(id);
-
-    function show(bot) {
-        for (const field of fields) {
-            const slider = get(`${bot}-${field.replaceAll("_", "-")}`);
-            get(`${slider.id}-value`).textContent = slider.value + (field === "probability" ? "%" : " сек");
-        }
-    }
-
-    function apply(bot, values) {
-        for (const field of fields) {
-            get(`${bot}-${field.replaceAll("_", "-")}`).value = values[field];
-        }
-        show(bot);
-    }
-
-    function enabled(bot, yes) {
-        for (const field of fields) {
-            get(`${bot}-${field.replaceAll("_", "-")}`).disabled = !yes;
-        }
-    }
-
-    function message(bot, text, kind = "") {
-        const element = get(`${bot}-save-status`);
-        element.textContent = text;
-        element.className = `save-status ${kind}`;
-    }
-
-    async function save(bot) {
-        enabled(bot, false);
-        message(bot, "⏳ Сохраняем в облаке...");
-        const values = {};
-        for (const field of fields) {
-            values[field] = Number(get(`${bot}-${field.replaceAll("_", "-")}`).value);
-        }
-        try {
-            const response = await fetch("/lab/api/settings", {
-                method: "POST",
-                headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
-                body: JSON.stringify({ bot, ...values })
-            });
-            if (response.status === 401) { location.assign("/lab/"); return; }
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const result = await response.json();
-            if (!result.success) throw new Error("Сервер не подтвердил сохранение");
-            saved[bot] = values;
-            message(bot, "✓ Сохранено в облаке · действует для новых постов", "ok");
-        } catch (error) {
-            apply(bot, saved[bot]);
-            message(bot, "✕ Ошибка сохранения. Возвращено прежнее значение", "bad");
-            console.error(error);
-        } finally {
-            enabled(bot, true);
-        }
-    }
-
-    for (const bot of bots) {
-        for (const field of fields) {
-            const slider = get(`${bot}-${field.replaceAll("_", "-")}`);
-            slider.addEventListener("input", () => {
-                if (field === "delay_min") {
-                    const max = get(`${bot}-delay-max`);
-                    if (Number(slider.value) > Number(max.value)) max.value = slider.value;
-                }
-                if (field === "delay_max") {
-                    const min = get(`${bot}-delay-min`);
-                    if (Number(slider.value) < Number(min.value)) min.value = slider.value;
-                }
-                show(bot);
-                message(bot, "Изменено — отпусти ползунок для сохранения");
-            });
-            slider.addEventListener("change", () => save(bot));
-        }
-    }
-
-    async function load() {
-        try {
-            const response = await fetch("/lab/api/status", { cache: "no-store" });
-            if (response.status === 401) { location.assign("/lab/"); return; }
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const data = await response.json();
-            csrf = data.csrf;
-            for (const name of ["serega", "furia", "mark"]) {
-                const card = name === "serega" ? document.querySelector(".bot-card") : document.querySelector(`[data-bot="${name}"]`);
-                card.querySelector(".muted").textContent = `Статус: ${data.bots[name].status}`;
-            }
-            get("lab-status").textContent = `● Лаборатория online · v${data.version}`;
-            for (const bot of bots) {
-                saved[bot] = {
-                    probability: data.bots[bot].probability,
-                    delay_min: data.bots[bot].delay_min,
-                    delay_max: data.bots[bot].delay_max
-                };
-                apply(bot, saved[bot]);
-                enabled(bot, true);
-                message(bot, "Настройки загружены");
-            }
-        } catch (error) {
-            get("lab-status").textContent = "● Нет связи с Python";
-            get("lab-status").classList.add("error");
-            console.error(error);
-        }
-    }
-    get("logout").addEventListener("click", async () => {
-        try {
-            await fetch("/lab/logout", { method: "POST", headers: { "X-CSRF-Token": csrf } });
-        } finally { location.assign("/lab/"); }
-    });
-    load();
-</script>
-</body>
-</html>
+'use strict';
+const names={serega:'Серёга',furia:'Фурия',mark:'Марк'};
+const bots=['serega','furia','mark'];const adjustable=['furia','mark'];const fields=['probability','delay_min','delay_max'];
+const get=id=>document.getElementById(id);const saved={};const powerState={};const busy=new Set();let csrf='';let initialized=false;
+function fmtTime(iso){if(!iso)return 'ещё не было';const d=new Date(iso);return Number.isNaN(d.getTime())?'—':d.toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});}
+function card(bot){return document.querySelector(`[data-bot="${bot}"]`)}
+function notice(bot,text,kind=''){const el=get(`${bot}-save-status`);el.textContent=text;el.className=`save-status ${kind}`;}
+function showSliders(bot){for(const field of fields){const slider=get(`${bot}-${field.replaceAll('_','-')}`);get(`${slider.id}-value`).textContent=slider.value+(field==='probability'?'%':' сек');}}
+function applySliders(bot,values){for(const field of fields)get(`${bot}-${field.replaceAll('_','-')}`).value=values[field];showSliders(bot);}
+function enableSliders(bot,on){for(const field of fields)get(`${bot}-${field.replaceAll('_','-')}`).disabled=!on;}
+function showPower(bot,on){const el=card(bot);el.classList.toggle('off',!on);const input=get(`${bot}-power`);input.checked=on;el.querySelector('.power-label').textContent=on?'ВКЛ':'ВЫКЛ';el.querySelector('.state').textContent=on?'Разрешены ответы':'Ответы отключены';el.querySelector('.state').classList.toggle('off',!on);}
+async function saveSettings(bot){if(busy.has(bot))return;busy.add(bot);enableSliders(bot,false);get(`${bot}-power`).disabled=true;notice(bot,'⏳ Сохраняем...');const values={};for(const field of fields)values[field]=Number(get(`${bot}-${field.replaceAll('_','-')}`).value);try{const r=await fetch('/lab/api/settings',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},body:JSON.stringify({bot,...values})});if(r.status===401){location.assign('/lab/');return;}if(!r.ok)throw Error(`HTTP ${r.status}`);saved[bot]=values;notice(bot,'✓ Настройки сохранены','ok');}catch(e){applySliders(bot,saved[bot]);notice(bot,'✕ Не удалось сохранить, прежние значения восстановлены','bad');console.error(e);}finally{busy.delete(bot);enableSliders(bot,true);get(`${bot}-power`).disabled=false;}}
+async function savePower(bot,on){if(busy.has(bot))return;busy.add(bot);get(`${bot}-power`).disabled=true;if(adjustable.includes(bot))enableSliders(bot,false);notice(bot,'⏳ Меняем режим...');try{const r=await fetch('/lab/api/power',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},body:JSON.stringify({bot,enabled:on})});if(r.status===401){location.assign('/lab/');return;}if(!r.ok)throw Error(`HTTP ${r.status}`);powerState[bot]=on;showPower(bot,on);notice(bot,on?'✓ Бот включён':'✓ Ответы бота отключены','ok');}catch(e){showPower(bot,powerState[bot]);notice(bot,'✕ Не удалось изменить режим','bad');console.error(e);}finally{busy.delete(bot);get(`${bot}-power`).disabled=false;if(adjustable.includes(bot))enableSliders(bot,true);}}
+function renderEvents(events){const list=get('events');list.replaceChildren();if(!events.length){const li=document.createElement('li');li.textContent='Пока событий нет. Ждём сообщения Telegram.';list.append(li);return;}for(const event of events){const li=document.createElement('li');const time=document.createElement('time');time.textContent=fmtTime(event.time);const who=document.createElement('span');who.className='who';who.textContent=names[event.bot]||event.bot;const what=document.createElement('span');what.className=`kind ${event.kind}`;what.textContent=event.text;li.append(time,who,what);list.append(li);}}
+async function refresh(){try{const r=await fetch('/lab/api/status',{cache:'no-store'});if(r.status===401){location.assign('/lab/');return;}if(!r.ok)throw Error(`HTTP ${r.status}`);const data=await r.json();csrf=data.csrf;get('lab-status').textContent=`● Лаборатория online · v${data.version}`;get('lab-status').classList.remove('bad');get('connection-error').textContent='';for(const bot of bots){const info=data.bots[bot],el=card(bot);for(const key of ['received','sent','errors'])el.querySelector(`[data-stat="${key}"]`).textContent=info.stats[key];el.querySelector('.activity').textContent=`Последний запрос: ${fmtTime(info.stats.last_received)} · ответ: ${fmtTime(info.stats.last_sent)}`;if(!busy.has(bot)){powerState[bot]=info.enabled;showPower(bot,info.enabled);get(`${bot}-power`).disabled=false;}if(!initialized&&adjustable.includes(bot)){saved[bot]={probability:info.probability,delay_min:info.delay_min,delay_max:info.delay_max};applySliders(bot,saved[bot]);enableSliders(bot,true);notice(bot,'Настройки загружены');}}renderEvents(data.events||[]);initialized=true;}catch(e){get('lab-status').textContent='● Нет связи с лабораторией';get('lab-status').classList.add('bad');get('connection-error').textContent='Не удалось обновить журнал и статусы. Проверь соединение.';console.error(e);}}
+for(const bot of bots)get(`${bot}-power`).addEventListener('change',e=>savePower(bot,e.target.checked));
+for(const bot of adjustable)for(const field of fields){const slider=get(`${bot}-${field.replaceAll('_','-')}`);slider.addEventListener('input',()=>{if(field==='delay_min'){const max=get(`${bot}-delay-max`);if(+slider.value>+max.value)max.value=slider.value;}if(field==='delay_max'){const min=get(`${bot}-delay-min`);if(+slider.value<+min.value)min.value=slider.value;}showSliders(bot);notice(bot,'Изменено — отпусти ползунок для сохранения');});slider.addEventListener('change',()=>saveSettings(bot));}
+get('logout').addEventListener('click',async()=>{try{await fetch('/lab/logout',{method:'POST',headers:{'X-CSRF-Token':csrf}});}finally{location.assign('/lab/');}});
+refresh();setInterval(refresh,15000);
+</script></body></html>
