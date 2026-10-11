@@ -9,7 +9,7 @@ import subprocess
 import cv2
 import imageio_ffmpeg
 
-from lab_control import get_bot_settings
+from lab_control import get_bot_settings, get_bot_enabled, record_event
 
 from aiogram import Bot, Dispatcher
 from aiogram.types import Message
@@ -1334,6 +1334,10 @@ async def channel_post_handler(
     message: Message
 ):
 
+    if not get_bot_enabled('mark'):
+        record_event('mark', 'skipped')
+        return
+
     post = (
         message.text
         or message.caption
@@ -1362,6 +1366,7 @@ async def channel_post_handler(
     probability, delay_min, delay_max = get_bot_settings("mark")
 
     if random.random() > probability:
+        record_event('mark', 'skipped')
 
         print(
             "😴 Марк решил промолчать."
@@ -1463,6 +1468,7 @@ async def channel_post_handler(
         )
 
     except Exception as e:
+        record_event('mark', 'errors')
 
         print("❌ Ошибка OpenAI:")
         print(type(e).__name__)
@@ -1489,6 +1495,10 @@ async def channel_post_handler(
     # ОТПРАВКА
     # -----------------------------------------------------
 
+    if not get_bot_enabled('mark'):
+        record_event('mark', 'skipped')
+        return
+
     try:
 
         sent_message = (
@@ -1496,8 +1506,10 @@ async def channel_post_handler(
                 comment
             )
         )
+        record_event('mark', 'sent')
 
     except Exception as e:
+        record_event('mark', 'errors')
 
         print(
             "❌ Не удалось "
@@ -1570,6 +1582,10 @@ async def channel_post_handler(
 async def reply_to_mark_handler(
     message: Message
 ):
+
+    if not get_bot_enabled('mark'):
+        record_event('mark', 'skipped')
+        return
 
     replied_message = (
         message.reply_to_message
@@ -1725,6 +1741,7 @@ async def reply_to_mark_handler(
         )
 
     except Exception as e:
+        record_event('mark', 'errors')
 
         print("❌ Ошибка OpenAI:")
         print(type(e).__name__)
@@ -1743,6 +1760,10 @@ async def reply_to_mark_handler(
     # ОТПРАВКА
     # -----------------------------------------------------
 
+    if not get_bot_enabled('mark'):
+        record_event('mark', 'skipped')
+        return
+
     try:
 
         sent_message = (
@@ -1750,8 +1771,10 @@ async def reply_to_mark_handler(
                 answer
             )
         )
+        record_event('mark', 'sent')
 
     except Exception as e:
+        record_event('mark', 'errors')
 
         print(
             "❌ Не удалось "

@@ -343,9 +343,13 @@ async def start_handler(
     message: Message
 ):
 
+    if not lab_control.get_bot_enabled('serega'):
+        return
+
     await message.answer(
         "Серёга на месте."
     )
+    lab_control.record_event('serega', 'sent')
 
 
 # =========================================================
@@ -358,6 +362,10 @@ async def start_handler(
 async def channel_post_handler(
     message: Message
 ):
+
+    if not lab_control.get_bot_enabled('serega'):
+        lab_control.record_event('serega', 'skipped')
+        return
 
     # Нас интересуют только изображения.
     #
@@ -433,9 +441,14 @@ async def channel_post_handler(
         # Поэтому комментарий оказывается
         # в связанной группе обсуждения.
 
+        if not lab_control.get_bot_enabled('serega'):
+            lab_control.record_event('serega', 'skipped')
+            return
+
         await message.reply(
             comment
         )
+        lab_control.record_event('serega', 'sent')
 
 
         print("")
@@ -446,6 +459,7 @@ async def channel_post_handler(
 
     except Exception as e:
 
+        lab_control.record_event('serega', 'errors')
         print("")
         print(
             "❌ СЕРЁГА НЕ СМОГ "
@@ -605,6 +619,8 @@ async def serega_webhook_handler(
             }
         )
 
+        lab_control.record_event('serega', 'received')
+
         run_in_background(
             dp.feed_update(
                 bot,
@@ -617,6 +633,7 @@ async def serega_webhook_handler(
         )
 
     except Exception as e:
+        lab_control.record_event('serega', 'errors')
 
         print("")
         print(
@@ -673,6 +690,8 @@ async def furia_webhook_handler(
             }
         )
 
+        lab_control.record_event('furia', 'received')
+
         run_in_background(
             furia_bot.dp.feed_update(
                 furia_bot.bot,
@@ -685,6 +704,7 @@ async def furia_webhook_handler(
         )
 
     except Exception as e:
+        lab_control.record_event('furia', 'errors')
 
         print("")
         print(
@@ -729,6 +749,8 @@ async def mark_webhook_handler(
             context={"bot": mark_bot.bot}
         )
 
+        lab_control.record_event('mark', 'received')
+
         run_in_background(
             mark_bot.dp.feed_update(
                 mark_bot.bot,
@@ -739,6 +761,7 @@ async def mark_webhook_handler(
         return web.Response(text="OK")
 
     except Exception as e:
+        lab_control.record_event('mark', 'errors')
         print("")
         print("❌ ОШИБКА ПРИ ПРИЁМЕ WEBHOOK МАРКА")
         print(type(e).__name__, e)

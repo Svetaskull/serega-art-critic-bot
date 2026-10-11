@@ -1,10 +1,12 @@
-"""Frankenstein Lab v0.5: password-protected controls for the shared aiohttp host.
+"""Frankenstein Lab v0.6: password-protected controls for the shared aiohttp host.
 
 Requires LAB_PASSWORD (at least 12 characters). Without it all /lab routes return 404.
 Do not run the old local lab_server.py in the cloud.
 """
 
 import hmac
+from collections import deque
+from datetime import datetime, timezone
 import json
 import os
 import secrets
@@ -23,6 +25,9 @@ COOKIE_NAME = 'frankenstein_session'
 SESSION_LIFETIME = 8 * 60 * 60
 
 DEFAULT_SETTINGS = {
+    'serega_enabled': True,
+    'furia_enabled': True,
+    'mark_enabled': True,
     'furia_probability': 70,
     'furia_delay_min': 20,
     'furia_delay_max': 120,
@@ -31,13 +36,21 @@ DEFAULT_SETTINGS = {
     'mark_delay_max': 120,
 }
 
-LOCK = threading.Lock()
+LOCK = threading.RLock()
+STARTED_AT = datetime.now(timezone.utc).isoformat(timespec='seconds')
+EVENTS = deque(maxlen=120)
+STATS = {name: {'received': 0, 'sent': 0, 'errors': 0, 'skipped': 0,
+                'last_received': None, 'last_sent': None, 'last_error': None}
+         for name in ('serega', 'furia', 'mark')}
 SESSIONS = {}  # Token -> (expiration, CSRF token); cleared on restart.
 FAILED_LOGINS = {}  # Remote IP -> recent failure timestamps.
 
 
 def valid_settings(value):
     if not isinstance(value, dict):
+        return False
+    if any(type(value.get(f'{bot}_enabled')) is not bool
+           for bot in ('serega', 'furia', 'mark')):
         return False
     for bot in ('furia', 'mark'):
         chance = value.get(f'{bot}_probability')
@@ -79,6 +92,36 @@ def get_bot_settings(bot):
             SETTINGS[f'{bot}_delay_min'],
             SETTINGS[f'{bot}_delay_max'],
         )
+
+
+def get_bot_enabled(bot):
+    """One source of truth for all three bot power switches."""
+    if bot not in STATS:
+        raise ValueError('Unknown bot')
+    with LOCK:
+        return SETTINGS[f'{bot}_enabled']
+
+
+def record_event(bot, kind):
+    """Metadata only: no chat IDs, usernames, messages or prompts."""
+    if bot not in STATS or kind not in ('received', 'sent', 'errors', 'skipped', 'power_on', 'power_off'):
+        return
+    now = datetime.now(timezone.utc).isoformat(timespec='seconds')
+    labels = {
+        'received': 'Получено обновление Telegram',
+        'sent': 'Отправлен ответ',
+        'errors': 'Ошибка обработки',
+        'skipped': 'Ответ пропущен',
+        'power_on': 'Ответы включены администратором',
+        'power_off': 'Ответы отключены администратором',
+    }
+    with LOCK:
+        if kind in ('received', 'sent', 'errors', 'skipped'):
+            STATS[bot][kind] += 1
+        if kind in ('received', 'sent', 'errors'):
+            STATS[bot]['last_' + ('error' if kind == 'errors' else kind)] = now
+        EVENTS.appendleft({'time': now, 'bot': bot, 'kind': kind,
+                           'text': labels[kind]})
 
 
 def _save_settings(settings):
@@ -211,16 +254,21 @@ async def status_handler(request):
     session = _require_session(request)
     with LOCK:
         settings = SETTINGS.copy()
-    result = {'lab': 'online', 'version': '0.5', 'csrf': session[1], 'bots': {
-        'serega': {'name': 'Серёга', 'status': 'сервер запущен'},
-    }}
-    for bot, name in (('furia', 'Фурия'), ('mark', 'Марк')):
-        result['bots'][bot] = {
-            'name': name, 'status': 'сервер запущен',
-            'probability': settings[f'{bot}_probability'],
-            'delay_min': settings[f'{bot}_delay_min'],
-            'delay_max': settings[f'{bot}_delay_max'],
-        }
+    with LOCK:
+        stats = {name: values.copy() for name, values in STATS.items()}
+        events = list(EVENTS)[:50]
+    result = {'lab': 'online', 'version': '0.6', 'csrf': session[1],
+              'started_at': STARTED_AT, 'events': events, 'bots': {}}
+    for bot, name in (('serega', 'Серёга'), ('furia', 'Фурия'), ('mark', 'Марк')):
+        data = {'name': name, 'enabled': settings[f'{bot}_enabled'],
+                'stats': stats[bot]}
+        if bot != 'serega':
+            data.update({
+                'probability': settings[f'{bot}_probability'],
+                'delay_min': settings[f'{bot}_delay_min'],
+                'delay_max': settings[f'{bot}_delay_max'],
+            })
+        result['bots'][bot] = data
     return _security_headers(web.json_response(result))
 
 
@@ -253,6 +301,34 @@ async def settings_handler(request):
     return _security_headers(web.json_response({'success': True, 'bot': bot}))
 
 
+async def power_handler(request):
+    session = _require_session(request)
+    _require_csrf(request, session)
+    if request.content_length is None or request.content_length > 512:
+        raise web.HTTPBadRequest(text='Неверный запрос')
+    try:
+        data = await request.json()
+        if not isinstance(data, dict) or data.get('bot') not in STATS:
+            raise ValueError('Неизвестный бот')
+        if type(data.get('enabled')) is not bool:
+            raise ValueError('enabled должен быть true или false')
+        bot = data['bot']
+        enabled = data['enabled']
+        with LOCK:
+            updated = SETTINGS | {f'{bot}_enabled': enabled}
+            if not valid_settings(updated):
+                raise ValueError('Некорректные настройки')
+            _save_settings(updated)
+            SETTINGS.update(updated)
+    except (ValueError, TypeError, KeyError) as exc:
+        raise web.HTTPBadRequest(text=f'Неверные настройки: {exc}')
+    except OSError:
+        raise web.HTTPInternalServerError(text='Не удалось сохранить переключатель')
+    record_event(bot, 'power_on' if enabled else 'power_off')
+    print(f'🧪 Лаборатория: {bot} → {"ВКЛ" if enabled else "ВЫКЛ"}')
+    return _security_headers(web.json_response({'success': True, 'bot': bot, 'enabled': enabled}))
+
+
 async def redirect_handler(request):
     raise web.HTTPFound('/lab/')
 
@@ -264,7 +340,8 @@ def register_routes(app):
     app.router.add_post('/lab/logout', logout_handler)
     app.router.add_get('/lab/api/status', status_handler)
     app.router.add_post('/lab/api/settings', settings_handler)
+    app.router.add_post('/lab/api/power', power_handler)
     if LAB_ENABLED:
-        print(f'🧪 Frankenstein Lab v0.5: включена; настройки в {SETTINGS_FILE}')
+        print(f'🧪 Frankenstein Lab v0.6: включена; настройки в {SETTINGS_FILE}')
     else:
         print('🔒 Frankenstein Lab отключена: задай LAB_PASSWORD длиной от 12 символов.')
