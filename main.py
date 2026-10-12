@@ -2,11 +2,12 @@ import asyncio
 import base64
 import hashlib
 import os
+import time
 
 from aiohttp import web
 
 from aiogram import Bot, Dispatcher, F
-from aiogram.filters import CommandStart
+from aiogram.filters import Command, CommandStart
 from aiogram.types import Message, Update
 from openai import OpenAI
 
@@ -346,9 +347,19 @@ async def start_handler(
     if not lab_control.get_bot_enabled('serega'):
         return
 
-    await message.answer(
-        "Серёга на месте."
-    )
+    if message.chat.type == "private":
+        if private_access_allowed(message):
+            await message.answer(
+                "Серёга на месте. 🎨 Присылай изображение и напиши, "
+                "что именно проверить. Можешь задавать уточняющие вопросы. "
+                "/reset — начать новый разбор."
+            )
+        else:
+            await message.answer(
+                "Личный режим Серёги пока не открыт для этого аккаунта."
+            )
+    else:
+        await message.answer("Серёга на месте.")
     lab_control.record_event('serega', 'sent')
 
 
@@ -472,6 +483,218 @@ async def channel_post_handler(
         )
 
         print("=" * 50)
+
+
+# =========================================================
+# СЕРЁГА 2.0 — ЛИЧНЫЙ АРТ-КОНСУЛЬТАНТ
+# =========================================================
+# ВАЖНО: этот режим независим от анализа постов в канале.
+# Доступ разрешён только Telegram ID из переменной окружения
+# SEREGA_PRIVATE_ALLOWED_IDS, например: 123456789,987654321
+# Без списка доступ закрыт, чтобы посторонние не тратили API-бюджет.
+
+PRIVATE_ALLOWED_IDS = {
+    int(value.strip())
+    for value in os.getenv("SEREGA_PRIVATE_ALLOWED_IDS", "").split(",")
+    if value.strip().isdigit()
+}
+
+PRIVATE_SESSION_TTL = 45 * 60  # 45 минут без сообщений
+PRIVATE_MAX_SESSIONS = 25
+PRIVATE_MAX_IMAGE_BYTES = 6 * 1024 * 1024
+PRIVATE_MAX_TEXT_CHARS = 3000
+PRIVATE_MAX_HISTORY_ITEMS = 12  # 6 последних пар вопрос/ответ
+
+# Память хранится только в RAM, отдельно для каждого личного чата.
+# После перезапуска Netrun она обнуляется — это ожидаемо для v2.0.
+private_sessions = {}
+private_chat_locks = {}
+
+PRIVATE_INSTRUCTIONS = """Ты — Серёга, опытный арт-критик и арт-директор.
+В личных сообщениях ты помогаешь дизайнеру или художнику улучшить работу.
+Говори по-русски, прямо, живо, с лёгкой иронией, но без унижений.
+Всегда учитывай подпись к изображению, пояснения, идею и критерии проверки.
+Если просят проверить конкретный аспект, сначала разбери именно его.
+Замечания делай предметными: что не так, где именно, почему и как исправить.
+Отделяй объективные ошибки от вкусовых предпочтений.
+Если изображение отсутствует, не притворяйся, будто видел его.
+Если изображение есть, рассматривай его вместе с историей разговора.
+Не утверждай, что изменил изображение: сейчас ты умеешь только анализировать.
+Отвечай понятно, без длинных вступлений и лишнего пафоса.
+"""
+
+
+def private_access_allowed(message: Message) -> bool:
+    return (
+        message.from_user is not None
+        and message.from_user.id in PRIVATE_ALLOWED_IDS
+    )
+
+
+def private_session(chat_id: int) -> dict:
+    now = time.monotonic()
+
+    # Не держим в памяти старые изображения бесконечно.
+    for key, state in list(private_sessions.items()):
+        if now - state["updated"] > PRIVATE_SESSION_TTL:
+            private_sessions.pop(key, None)
+
+    if chat_id not in private_sessions:
+        if len(private_sessions) >= PRIVATE_MAX_SESSIONS:
+            oldest_id = min(
+                private_sessions,
+                key=lambda key: private_sessions[key]["updated"]
+            )
+            private_sessions.pop(oldest_id, None)
+        private_sessions[chat_id] = {
+            "history": [],
+            "image": None,
+            "mime_type": None,
+            "updated": now,
+        }
+
+    state = private_sessions[chat_id]
+    state["updated"] = now
+    return state
+
+
+def private_critique_sync(history: list, image: bytes | None,
+                          mime_type: str | None, question: str) -> str:
+    # В историю кладём только текст; изображение передаём отдельно.
+    content = [{"type": "input_text", "text": question}]
+    if image is not None and mime_type is not None:
+        content.append({
+            "type": "input_image",
+            "image_url": image_bytes_to_data_url(image, mime_type),
+        })
+
+    response = client.responses.create(
+        model="gpt-5.6-luna",
+        instructions=PRIVATE_INSTRUCTIONS,
+        input=history + [{"role": "user", "content": content}],
+        max_output_tokens=1800,
+    )
+    result = (response.output_text or "").strip()
+    if not result:
+        raise RuntimeError("OpenAI вернул пустой ответ в личном режиме")
+    return result
+
+
+@dp.message(Command("reset"), F.chat.type == "private")
+async def private_reset_handler(message: Message):
+    if not lab_control.get_bot_enabled("serega"):
+        lab_control.record_event("serega", "skipped")
+        return
+    if not private_access_allowed(message):
+        await message.answer("Личный режим Серёги пока не открыт для этого аккаунта.")
+        return
+
+    chat_id = message.chat.id
+    lock = private_chat_locks.setdefault(chat_id, asyncio.Lock())
+    async with lock:
+        private_sessions.pop(chat_id, None)
+    await message.answer("Контекст очищен. Присылай новую работу и задание. 🎨")
+    lab_control.record_event("serega", "sent")
+
+
+@dp.message(F.chat.type == "private")
+async def private_art_director_handler(message: Message):
+    if not lab_control.get_bot_enabled("serega"):
+        lab_control.record_event("serega", "skipped")
+        return
+
+    if not private_access_allowed(message):
+        await message.answer("Личный режим Серёги пока не открыт для этого аккаунта.")
+        return
+
+    # Команды, не поддерживаемые личным режимом, не отправляем модели.
+    if (message.text or "").startswith("/"):
+        await message.answer("Пришли изображение с заданием или напиши вопрос. /reset — начать заново.")
+        lab_control.record_event("serega", "sent")
+        return
+
+    question = (message.caption or message.text or "").strip()
+    if len(question) > PRIVATE_MAX_TEXT_CHARS:
+        await message.answer("Слишком длинное задание. Сократи текст до 3000 символов.")
+        lab_control.record_event("serega", "sent")
+        return
+
+    # Документы PDF, ZIP и другие файлы не считаем изображениями.
+    document = message.document
+    is_image_document = bool(document and (
+        document.mime_type in {"image/jpeg", "image/png", "image/webp"}
+        or (document.file_name or "").lower().endswith((".jpg", ".jpeg", ".png", ".webp"))
+    ))
+    has_image = bool(message.photo or is_image_document)
+
+    if not question and not has_image:
+        await message.answer("Пришли картинку, описание идеи или вопрос по дизайну. 🎨")
+        lab_control.record_event("serega", "sent")
+        return
+
+    chat_id = message.chat.id
+    lock = private_chat_locks.setdefault(chat_id, asyncio.Lock())
+    async with lock:
+        try:
+            state = private_session(chat_id)
+            if has_image:
+                if document and document.file_size and document.file_size > PRIVATE_MAX_IMAGE_BYTES:
+                    await message.answer("Изображение слишком большое. Пришли файл до 6 МБ.")
+                    lab_control.record_event("serega", "sent")
+                    return
+
+                image_data = await download_image_from_message(message)
+                if image_data is None:
+                    await message.answer("Не получилось прочитать изображение. Попробуй JPG или PNG.")
+                    lab_control.record_event("serega", "sent")
+                    return
+
+                image_bytes, mime_type = image_data
+                if len(image_bytes) > PRIVATE_MAX_IMAGE_BYTES:
+                    await message.answer("Изображение слишком большое. Пришли файл до 6 МБ.")
+                    lab_control.record_event("serega", "sent")
+                    return
+
+                # Если пользователь сначала прислал текстовые заметки,
+                # сохраняем их. Если картинка уже была, начинаем новый разбор.
+                if state["image"] is not None:
+                    state["history"] = []
+                state["image"] = image_bytes
+                state["mime_type"] = mime_type
+
+            if not question:
+                question = "Разбери эту работу: сильные стороны, проблемы и конкретные улучшения."
+
+            answer = await asyncio.to_thread(
+                private_critique_sync,
+                list(state["history"]),
+                state["image"],
+                state["mime_type"],
+                question,
+            )
+
+            # Администратор мог выключить бота, пока нейросеть думала.
+            if not lab_control.get_bot_enabled("serega"):
+                lab_control.record_event("serega", "skipped")
+                return
+
+            # У Telegram лимит на длину одного сообщения.
+            for offset in range(0, len(answer), 3900):
+                await message.answer(answer[offset:offset + 3900])
+                lab_control.record_event("serega", "sent")
+
+            state["history"].extend([
+                {"role": "user", "content": question},
+                {"role": "assistant", "content": answer},
+            ])
+            state["history"] = state["history"][-PRIVATE_MAX_HISTORY_ITEMS:]
+            state["updated"] = time.monotonic()
+
+        except Exception as exc:
+            lab_control.record_event("serega", "errors")
+            print("❌ Серёга 2.0: ошибка личного режима:", type(exc).__name__, str(exc)[:300])
+            if lab_control.get_bot_enabled("serega"):
+                await message.answer("Не смог обработать запрос. Попробуй ещё раз чуть позже.")
 
 
 # =========================================================
