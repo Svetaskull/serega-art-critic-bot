@@ -352,7 +352,8 @@ async def start_handler(
             await message.answer(
                 "Серёга на месте. 🎨 Присылай изображение и напиши, "
                 "что именно проверить. Можешь задавать уточняющие вопросы. "
-                "/reset — начать новый разбор."
+                "Можно отправить альбом до 5 картинок для сравнения. "
+                "/images — список по количеству, /reset — новый разбор."
             )
         else:
             await message.answer(
@@ -486,11 +487,10 @@ async def channel_post_handler(
 
 
 # =========================================================
-# СЕРЁГА 2.0 — ЛИЧНЫЙ АРТ-КОНСУЛЬТАНТ
+# СЕРЁГА 2.1 — ЛИЧНЫЙ АРТ-КОНСУЛЬТАНТ
 # =========================================================
-# ВАЖНО: этот режим независим от анализа постов в канале.
-# Доступ разрешён только Telegram ID из переменной окружения
-# SEREGA_PRIVATE_ALLOWED_IDS, например: 123456789,987654321
+# Этот режим независим от комментариев к постам канала.
+# Доступ разрешён только Telegram ID из SEREGA_PRIVATE_ALLOWED_IDS.
 # Без списка доступ закрыт, чтобы посторонние не тратили API-бюджет.
 
 PRIVATE_ALLOWED_IDS = {
@@ -501,24 +501,34 @@ PRIVATE_ALLOWED_IDS = {
 
 PRIVATE_SESSION_TTL = 45 * 60  # 45 минут без сообщений
 PRIVATE_MAX_SESSIONS = 25
-PRIVATE_MAX_IMAGE_BYTES = 6 * 1024 * 1024
+PRIVATE_MAX_IMAGE_BYTES = 6 * 1024 * 1024  # на одно изображение
+PRIVATE_MAX_IMAGES = 5  # не больше пяти изображений в одном разборе
+PRIVATE_MAX_TOTAL_IMAGE_BYTES = 18 * 1024 * 1024
 PRIVATE_MAX_TEXT_CHARS = 3000
 PRIVATE_MAX_HISTORY_ITEMS = 12  # 6 последних пар вопрос/ответ
+PRIVATE_ALBUM_WAIT_SECONDS = 2.0  # ждём все части Telegram-альбома
 
-# Память хранится только в RAM, отдельно для каждого личного чата.
-# После перезапуска Netrun она обнуляется — это ожидаемо для v2.0.
+# Память живёт только в RAM. Перезапуск Netrun очищает её.
+# Снимки хранятся отдельно для каждого личного чата.
 private_sessions = {}
 private_chat_locks = {}
+private_albums = {}  # (chat_id, media_group_id) -> ожидающие сообщения
 
 PRIVATE_INSTRUCTIONS = """Ты — Серёга, опытный арт-критик и арт-директор.
 В личных сообщениях ты помогаешь дизайнеру или художнику улучшить работу.
 Говори по-русски, прямо, живо, с лёгкой иронией, но без унижений.
-Всегда учитывай подпись к изображению, пояснения, идею и критерии проверки.
+Всегда учитывай подписи к изображениям, пояснения, идею и критерии проверки.
 Если просят проверить конкретный аспект, сначала разбери именно его.
 Замечания делай предметными: что не так, где именно, почему и как исправить.
 Отделяй объективные ошибки от вкусовых предпочтений.
-Если изображение отсутствует, не притворяйся, будто видел его.
-Если изображение есть, рассматривай его вместе с историей разговора.
+Если изображений нет, не притворяйся, будто видел их.
+Если изображения есть, рассматривай их вместе с историей разговора.
+Если прислано несколько изображений, сравнивай их как отдельные работы:
+чётко называй «изображение 1», «изображение 2» и так далее.
+Не путай изображения, не приписывай одному детали другого.
+При сравнении версий отмечай, что стало лучше, что хуже и какой вариант
+предпочтительнее по заданному критерию. Не выдумывай отличия.
+Новые изображения не отменяют старые, пока пользователь не вызвал /reset.
 Не утверждай, что изменил изображение: сейчас ты умеешь только анализировать.
 Отвечай понятно, без длинных вступлений и лишнего пафоса.
 """
@@ -534,7 +544,6 @@ def private_access_allowed(message: Message) -> bool:
 def private_session(chat_id: int) -> dict:
     now = time.monotonic()
 
-    # Не держим в памяти старые изображения бесконечно.
     for key, state in list(private_sessions.items()):
         if now - state["updated"] > PRIVATE_SESSION_TTL:
             private_sessions.pop(key, None)
@@ -548,8 +557,7 @@ def private_session(chat_id: int) -> dict:
             private_sessions.pop(oldest_id, None)
         private_sessions[chat_id] = {
             "history": [],
-            "image": None,
-            "mime_type": None,
+            "images": [],  # [(bytes, mime_type), ...]
             "updated": now,
         }
 
@@ -558,14 +566,19 @@ def private_session(chat_id: int) -> dict:
     return state
 
 
-def private_critique_sync(history: list, image: bytes | None,
-                          mime_type: str | None, question: str) -> str:
-    # В историю кладём только текст; изображение передаём отдельно.
+def private_critique_images_sync(history: list, images: list,
+                                 question: str) -> str:
+    # На каждом ходе повторно передаём все картинки текущего разбора.
+    # История содержит только текст, поэтому не раздувается base64-данными.
     content = [{"type": "input_text", "text": question}]
-    if image is not None and mime_type is not None:
+    for index, (image_bytes, mime_type) in enumerate(images, start=1):
+        content.append({
+            "type": "input_text",
+            "text": f"Изображение {index} из {len(images)}:",
+        })
         content.append({
             "type": "input_image",
-            "image_url": image_bytes_to_data_url(image, mime_type),
+            "image_url": image_bytes_to_data_url(image_bytes, mime_type),
         })
 
     response = client.responses.create(
@@ -580,6 +593,168 @@ def private_critique_sync(history: list, image: bytes | None,
     return result
 
 
+def private_critique_sync(history: list, image: bytes | None,
+                          mime_type: str | None, question: str) -> str:
+    # Сохраняем совместимость с тестами и вызовами Серёги 2.0.
+    images = [(image, mime_type)] if image is not None and mime_type else []
+    return private_critique_images_sync(history, images, question)
+
+
+def private_is_image(message: Message) -> bool:
+    document = message.document
+    return bool(message.photo or (document and (
+        document.mime_type in {"image/jpeg", "image/png", "image/webp"}
+        or (document.file_name or "").lower().endswith(
+            (".jpg", ".jpeg", ".png", ".webp")
+        )
+    )))
+
+
+async def private_answer(message: Message, text: str):
+    for offset in range(0, len(text), 3900):
+        await message.answer(text[offset:offset + 3900])
+        lab_control.record_event("serega", "sent")
+
+
+async def private_process_messages(messages: list[Message]):
+    """Один запрос к ИИ на одно сообщение или целый Telegram-альбом."""
+    messages = sorted(messages, key=lambda item: item.message_id)
+    message = messages[-1]
+    chat_id = message.chat.id
+    lock = private_chat_locks.setdefault(chat_id, asyncio.Lock())
+
+    async with lock:
+        try:
+            if not lab_control.get_bot_enabled("serega"):
+                lab_control.record_event("serega", "skipped")
+                return
+
+            state = private_session(chat_id)
+            new_image_messages = [m for m in messages if private_is_image(m)]
+            captions = [(m.caption or m.text or "").strip() for m in messages]
+            captions = [caption for caption in captions if caption]
+
+            if sum(len(caption) for caption in captions) > PRIVATE_MAX_TEXT_CHARS:
+                await private_answer(message, "Слишком длинное задание. Сократи текст до 3000 символов.")
+                return
+
+            if not new_image_messages and not captions:
+                await private_answer(message, "Пришли картинку, описание идеи или вопрос по дизайну. 🎨")
+                return
+
+            if len(state["images"]) + len(new_image_messages) > PRIVATE_MAX_IMAGES:
+                await private_answer(
+                    message,
+                    f"В одном разборе можно хранить до {PRIVATE_MAX_IMAGES} изображений. "
+                    "Отправь /reset, чтобы начать новый набор картинок."
+                )
+                return
+
+            # Сначала скачиваем и проверяем весь набор; при ошибке
+            # не добавляем в память ни одной картинки из альбома.
+            new_images = []
+            for image_message in new_image_messages:
+                document = image_message.document
+                if document and document.file_size and document.file_size > PRIVATE_MAX_IMAGE_BYTES:
+                    await private_answer(message, "Изображение слишком большое. Пришли файл до 6 МБ.")
+                    return
+
+                image_data = await download_image_from_message(image_message)
+                if image_data is None:
+                    await private_answer(message, "Не получилось прочитать изображение. Попробуй JPG или PNG.")
+                    return
+                image_bytes, mime_type = image_data
+                if len(image_bytes) > PRIVATE_MAX_IMAGE_BYTES:
+                    await private_answer(message, "Изображение слишком большое. Пришли файл до 6 МБ.")
+                    return
+                new_images.append((image_bytes, mime_type))
+
+            images = state["images"] + new_images
+            if sum(len(data) for data, _ in images) > PRIVATE_MAX_TOTAL_IMAGE_BYTES:
+                await private_answer(
+                    message,
+                    "Суммарный размер изображений превышает 18 МБ. "
+                    "Пришли картинки поменьше или начни новый разбор через /reset."
+                )
+                return
+
+            first_new_index = len(state["images"]) + 1
+            if len(captions) == 1:
+                question = captions[0]
+            elif len(captions) > 1:
+                # Для альбома подписи привязываем к номеру конкретной картинки.
+                question = "\n".join(
+                    f"Подпись к изображению {first_new_index + index}: "
+                    f"{(m.caption or m.text).strip()}"
+                    for index, m in enumerate(messages)
+                    if (m.caption or m.text or "").strip()
+                )
+            elif len(images) > 1 and new_images:
+                question = (
+                    "Сравни присланные изображения по композиции, "
+                    "сильным и слабым сторонам. Что стало лучше или хуже? "
+                    "Называй изображения по номерам."
+                )
+            elif new_images:
+                question = "Разбери эту работу: сильные стороны, проблемы и конкретные улучшения."
+            else:
+                question = "Разбери текущие работы и ответь на мой вопрос."
+
+            # Сохраняем набор только после проверки всех лимитов.
+            state["images"] = images
+            history_question = question
+            if new_images:
+                numbers = list(range(first_new_index, first_new_index + len(new_images)))
+                history_question = (
+                    f"[Добавлены изображения: {', '.join(map(str, numbers))}. "
+                    f"Всего изображений: {len(images)}.]\n{question}"
+                )
+
+            answer = await asyncio.to_thread(
+                private_critique_images_sync,
+                list(state["history"]),
+                list(state["images"]),
+                history_question,
+            )
+
+            if not lab_control.get_bot_enabled("serega"):
+                lab_control.record_event("serega", "skipped")
+                return
+
+            await private_answer(message, answer)
+            state["history"].extend([
+                {"role": "user", "content": history_question},
+                {"role": "assistant", "content": answer},
+            ])
+            state["history"] = state["history"][-PRIVATE_MAX_HISTORY_ITEMS:]
+            state["updated"] = time.monotonic()
+
+        except Exception as exc:
+            lab_control.record_event("serega", "errors")
+            print("❌ Серёга 2.1: ошибка личного режима:", type(exc).__name__, str(exc)[:300])
+            if lab_control.get_bot_enabled("serega"):
+                await private_answer(message, "Не смог обработать запрос. Попробуй ещё раз чуть позже.")
+
+
+async def private_flush_album(key: tuple):
+    """Telegram присылает альбом несколькими обновлениями: ждём их все."""
+    try:
+        while True:
+            album = private_albums.get(key)
+            if album is None:
+                return
+            wait = PRIVATE_ALBUM_WAIT_SECONDS - (time.monotonic() - album["updated"])
+            if wait > 0:
+                await asyncio.sleep(wait)
+                continue
+            messages = album["messages"]
+            private_albums.pop(key, None)
+            await private_process_messages(messages)
+            return
+    except asyncio.CancelledError:
+        return
+
+
 @dp.message(Command("reset"), F.chat.type == "private")
 async def private_reset_handler(message: Message):
     if not lab_control.get_bot_enabled("serega"):
@@ -590,11 +765,34 @@ async def private_reset_handler(message: Message):
         return
 
     chat_id = message.chat.id
+    # Отменяем ещё не собранные альбомы, чтобы они не вернулись после /reset.
+    for key, album in list(private_albums.items()):
+        if key[0] == chat_id:
+            private_albums.pop(key, None)
+            album["task"].cancel()
+
     lock = private_chat_locks.setdefault(chat_id, asyncio.Lock())
     async with lock:
         private_sessions.pop(chat_id, None)
-    await message.answer("Контекст очищен. Присылай новую работу и задание. 🎨")
-    lab_control.record_event("serega", "sent")
+    await private_answer(message, "Контекст очищен. Присылай новую работу и задание. 🎨")
+
+
+@dp.message(Command("images"), F.chat.type == "private")
+async def private_images_handler(message: Message):
+    if not lab_control.get_bot_enabled("serega"):
+        lab_control.record_event("serega", "skipped")
+        return
+    if not private_access_allowed(message):
+        await message.answer("Личный режим Серёги пока не открыт для этого аккаунта.")
+        return
+    lock = private_chat_locks.setdefault(message.chat.id, asyncio.Lock())
+    async with lock:
+        count = len(private_session(message.chat.id)["images"])
+    await private_answer(
+        message,
+        f"В текущем разборе {count} из {PRIVATE_MAX_IMAGES} изображений. "
+        "Для нового набора используй /reset."
+    )
 
 
 @dp.message(F.chat.type == "private")
@@ -607,94 +805,36 @@ async def private_art_director_handler(message: Message):
         await message.answer("Личный режим Серёги пока не открыт для этого аккаунта.")
         return
 
-    # Команды, не поддерживаемые личным режимом, не отправляем модели.
     if (message.text or "").startswith("/"):
-        await message.answer("Пришли изображение с заданием или напиши вопрос. /reset — начать заново.")
-        lab_control.record_event("serega", "sent")
+        await private_answer(
+            message,
+            "Пришли изображения с заданием или напиши вопрос. "
+            "/images — сколько картинок в памяти; /reset — начать заново."
+        )
         return
 
-    question = (message.caption or message.text or "").strip()
-    if len(question) > PRIVATE_MAX_TEXT_CHARS:
-        await message.answer("Слишком длинное задание. Сократи текст до 3000 символов.")
-        lab_control.record_event("serega", "sent")
+    if message.media_group_id and private_is_image(message):
+        # Один Telegram-альбом = один анализ и один ответ, а не 5 ответов.
+        key = (message.chat.id, message.media_group_id)
+        album = private_albums.get(key)
+        if album is None:
+            album = {"messages": [], "updated": time.monotonic(), "task": None}
+            private_albums[key] = album
+            album["task"] = run_in_background(private_flush_album(key))
+        album["messages"].append(message)
+        album["updated"] = time.monotonic()
         return
 
-    # Документы PDF, ZIP и другие файлы не считаем изображениями.
-    document = message.document
-    is_image_document = bool(document and (
-        document.mime_type in {"image/jpeg", "image/png", "image/webp"}
-        or (document.file_name or "").lower().endswith((".jpg", ".jpeg", ".png", ".webp"))
-    ))
-    has_image = bool(message.photo or is_image_document)
+    # Если текст пришёл сразу после альбома, дожидаемся его обработки,
+    # чтобы вопрос не обогнал ещё загружающиеся изображения.
+    pending = [
+        album["task"] for key, album in list(private_albums.items())
+        if key[0] == message.chat.id
+    ]
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
 
-    if not question and not has_image:
-        await message.answer("Пришли картинку, описание идеи или вопрос по дизайну. 🎨")
-        lab_control.record_event("serega", "sent")
-        return
-
-    chat_id = message.chat.id
-    lock = private_chat_locks.setdefault(chat_id, asyncio.Lock())
-    async with lock:
-        try:
-            state = private_session(chat_id)
-            if has_image:
-                if document and document.file_size and document.file_size > PRIVATE_MAX_IMAGE_BYTES:
-                    await message.answer("Изображение слишком большое. Пришли файл до 6 МБ.")
-                    lab_control.record_event("serega", "sent")
-                    return
-
-                image_data = await download_image_from_message(message)
-                if image_data is None:
-                    await message.answer("Не получилось прочитать изображение. Попробуй JPG или PNG.")
-                    lab_control.record_event("serega", "sent")
-                    return
-
-                image_bytes, mime_type = image_data
-                if len(image_bytes) > PRIVATE_MAX_IMAGE_BYTES:
-                    await message.answer("Изображение слишком большое. Пришли файл до 6 МБ.")
-                    lab_control.record_event("serega", "sent")
-                    return
-
-                # Если пользователь сначала прислал текстовые заметки,
-                # сохраняем их. Если картинка уже была, начинаем новый разбор.
-                if state["image"] is not None:
-                    state["history"] = []
-                state["image"] = image_bytes
-                state["mime_type"] = mime_type
-
-            if not question:
-                question = "Разбери эту работу: сильные стороны, проблемы и конкретные улучшения."
-
-            answer = await asyncio.to_thread(
-                private_critique_sync,
-                list(state["history"]),
-                state["image"],
-                state["mime_type"],
-                question,
-            )
-
-            # Администратор мог выключить бота, пока нейросеть думала.
-            if not lab_control.get_bot_enabled("serega"):
-                lab_control.record_event("serega", "skipped")
-                return
-
-            # У Telegram лимит на длину одного сообщения.
-            for offset in range(0, len(answer), 3900):
-                await message.answer(answer[offset:offset + 3900])
-                lab_control.record_event("serega", "sent")
-
-            state["history"].extend([
-                {"role": "user", "content": question},
-                {"role": "assistant", "content": answer},
-            ])
-            state["history"] = state["history"][-PRIVATE_MAX_HISTORY_ITEMS:]
-            state["updated"] = time.monotonic()
-
-        except Exception as exc:
-            lab_control.record_event("serega", "errors")
-            print("❌ Серёга 2.0: ошибка личного режима:", type(exc).__name__, str(exc)[:300])
-            if lab_control.get_bot_enabled("serega"):
-                await message.answer("Не смог обработать запрос. Попробуй ещё раз чуть позже.")
+    await private_process_messages([message])
 
 
 # =========================================================
@@ -789,6 +929,8 @@ def run_in_background(
     task.add_done_callback(
         background_task_finished
     )
+
+    return task
 
 
 # =========================================================
