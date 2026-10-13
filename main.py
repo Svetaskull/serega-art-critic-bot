@@ -487,7 +487,7 @@ async def channel_post_handler(
 
 
 # =========================================================
-# СЕРЁГА 2.1 — ЛИЧНЫЙ АРТ-КОНСУЛЬТАНТ
+# СЕРЁГА 2.2 — ЛИЧНЫЙ АРТ-КОНСУЛЬТАНТ
 # =========================================================
 # Этот режим независим от комментариев к постам канала.
 # Доступ разрешён только Telegram ID из SEREGA_PRIVATE_ALLOWED_IDS.
@@ -507,6 +507,9 @@ PRIVATE_MAX_TOTAL_IMAGE_BYTES = 18 * 1024 * 1024
 PRIVATE_MAX_TEXT_CHARS = 3000
 PRIVATE_MAX_HISTORY_ITEMS = 12  # 6 последних пар вопрос/ответ
 PRIVATE_ALBUM_WAIT_SECONDS = 2.0  # ждём все части Telegram-альбома
+PRIVATE_RESPONSE_TOKENS = 3200  # запас для полного ответа, не целевая длина
+PRIVATE_CONTINUATION_TOKENS = 2600
+PRIVATE_TELEGRAM_CHUNK_CHARS = 3900
 
 # Память живёт только в RAM. Перезапуск Netrun очищает её.
 # Снимки хранятся отдельно для каждого личного чата.
@@ -531,6 +534,11 @@ PRIVATE_INSTRUCTIONS = """Ты — Серёга, опытный арт-крит�
 Новые изображения не отменяют старые, пока пользователь не вызвал /reset.
 Не утверждай, что изменил изображение: сейчас ты умеешь только анализировать.
 Отвечай понятно, без длинных вступлений и лишнего пафоса.
+В обычном режиме отвечай компактно: ориентир 1500–2500 символов.
+Сначала короткий вывод, затем только существенные наблюдения и правки.
+Не повторяй одну мысль в нескольких разделах и не пересказывай всю теорию.
+Если просят подробный разбор, можно отвечать длиннее, но без воды.
+Не обрывай предложения: заканчивай ответ законченным выводом.
 """
 
 
@@ -585,9 +593,54 @@ def private_critique_images_sync(history: list, images: list,
         model="gpt-5.6-luna",
         instructions=PRIVATE_INSTRUCTIONS,
         input=history + [{"role": "user", "content": content}],
-        max_output_tokens=1800,
+        max_output_tokens=PRIVATE_RESPONSE_TOKENS,
     )
-    result = (response.output_text or "").strip()
+    parts = [(response.output_text or "").strip()]
+
+    # Responses API может вернуть неполный текст при исчерпании токенов.
+    # Один раз просим продолжить, чтобы не выдавать обрыв как готовый ответ.
+    if getattr(response, "status", None) == "incomplete":
+        reason = getattr(getattr(response, "incomplete_details", None), "reason", None)
+        if reason == "max_output_tokens" and getattr(response, "id", None):
+            print("⚠️ Серёга: лимит ответа, запрашиваем продолжение")
+            continuation = client.responses.create(
+                model="gpt-5.6-luna",
+                instructions=PRIVATE_INSTRUCTIONS,
+                previous_response_id=response.id,
+                input=[{
+                    "role": "user",
+                    "content": (
+                        "Продолжи ровно с того места, где ответ оборвался. "
+                        "Не повторяй уже сказанное. Закончи мысль и дай краткий итог."
+                    ),
+                }],
+                max_output_tokens=PRIVATE_CONTINUATION_TOKENS,
+            )
+            next_part = (continuation.output_text or "").strip()
+            if next_part:
+                parts.append(next_part)
+            else:
+                parts.append("[Продолжение не получено. Попроси закончить разбор.]")
+            if getattr(continuation, "status", None) != "completed":
+                print("⚠️ Серёга: продолжение не завершилось штатно")
+                parts.append("[Ответ мог оборваться. Попроси продолжить разбор.]")
+        else:
+            print(f"⚠️ Серёга: ответ неполный, причина: {reason}")
+            parts.append("[Ответ не завершён. Попроси продолжить разбор.]")
+
+    # Продолжение может начинаться посреди предложения. В таком случае
+    # склеиваем его через пробел, а не создаём новый абзац.
+    result = ""
+    for part in parts:
+        if not part:
+            continue
+        if not result:
+            result = part
+        elif result[-1] in ".!?…:;\n" or part.startswith("["):
+            result += "\n\n" + part
+        else:
+            result += " " + part
+    result = result.strip()
     if not result:
         raise RuntimeError("OpenAI вернул пустой ответ в личном режиме")
     return result
@@ -610,9 +663,42 @@ def private_is_image(message: Message) -> bool:
     )))
 
 
+def private_split_text(text: str, limit: int = PRIVATE_TELEGRAM_CHUNK_CHARS) -> list[str]:
+    """Делим по абзацам/предложениям/словам, не посреди слова."""
+    if not text:
+        return []
+    chunks = []
+    remaining = text.strip()
+    while len(remaining) > limit:
+        window = remaining[:limit]
+        # Стараемся сохранить структуру ответа.
+        minimum = limit // 2
+        cut = window.rfind("\n\n", minimum)
+        if cut < 0:
+            cut = window.rfind("\n", minimum)
+        if cut < 0:
+            # Для обычного предложения предпочтительнее граница фразы.
+            candidates = [window.rfind(mark, minimum) for mark in (". ", "! ", "? ")]
+            cut = max(candidates)
+            if cut >= 0:
+                cut += 1
+        if cut < 0:
+            cut = window.rfind(" ", minimum)
+        if cut < 0:
+            # Единственное исключение — сплошная строка > лимита Telegram.
+            cut = limit
+        piece = remaining[:cut].strip()
+        if piece:
+            chunks.append(piece)
+        remaining = remaining[cut:].strip()
+    if remaining:
+        chunks.append(remaining)
+    return chunks
+
+
 async def private_answer(message: Message, text: str):
-    for offset in range(0, len(text), 3900):
-        await message.answer(text[offset:offset + 3900])
+    for part in private_split_text(text):
+        await message.answer(part)
         lab_control.record_event("serega", "sent")
 
 
@@ -731,7 +817,7 @@ async def private_process_messages(messages: list[Message]):
 
         except Exception as exc:
             lab_control.record_event("serega", "errors")
-            print("❌ Серёга 2.1: ошибка личного режима:", type(exc).__name__, str(exc)[:300])
+            print("❌ Серёга 2.2: ошибка личного режима:", type(exc).__name__, str(exc)[:300])
             if lab_control.get_bot_enabled("serega"):
                 await private_answer(message, "Не смог обработать запрос. Попробуй ещё раз чуть позже.")
 
