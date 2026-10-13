@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Frankenstein Lab · v0.6</title>
+<title>Frankenstein Lab · v0.7</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,'Segoe UI',Arial,sans-serif;background:#101218;color:#f3f5f8}
 *{box-sizing:border-box}body{margin:0;padding:28px 20px 60px}main{max-width:1200px;margin:auto}
@@ -18,9 +18,9 @@
 </style>
 </head>
 <body><main>
-<div class="header"><div><h1>🧪 Лаборатория Франкенштейна</h1><p class="subtitle">Центр управления электронными долбоёбами · v0.6</p></div>
+<div class="header"><div><h1>🧪 Лаборатория Франкенштейна</h1><p class="subtitle">Центр управления электронными долбоёбами · v0.7</p></div>
 <div class="actions"><span id="lab-status" class="badge">Подключаемся...</span><button id="logout" class="logout" type="button">Выйти</button></div></div>
-<div class="notice">⚡ Переключатель «ВЫКЛ» запрещает боту отправлять новые ответы, включая продолжение разговоров. Уже отправленные сообщения не удаляются. Статистика показывает события, полученные этим процессом с момента его запуска; она не проверяет доступность Telegram API. После перезапуска Netrun журнал обнуляется.</div>
+<div class="notice">⚡ Переключатель «ВЫКЛ» запрещает боту отправлять новые ответы, включая продолжение разговоров. Уже отправленные сообщения не удаляются. Статистика и последние 120 событий сохраняются в /data и восстанавливаются после перезапуска Netrun. Статистика не проверяет доступность Telegram API.</div>
 <div class="bots">
 <article class="card" data-bot="serega"><div class="top"><h2>👨 Серёга</h2><label class="switch"><input type="checkbox" id="serega-power" disabled aria-label="Включить Серёгу"><span class="track"></span><span class="power-label">...</span></label></div><p class="state">Загрузка...</p><p class="muted activity">Последний запрос: —</p><div class="stats"><div class="stat"><strong data-stat="received">0</strong><span>Запросов</span></div><div class="stat"><strong data-stat="sent">0</strong><span>Ответов</span></div><div class="stat"><strong data-stat="errors">0</strong><span>Ошибок</span></div></div><p class="card-note">Художественный душнила. Анализирует изображения из канала.</p><p class="save-status" id="serega-save-status"></p></article>
 <article class="card" data-bot="furia"><div class="top"><h2>💅 Фурия</h2><label class="switch"><input type="checkbox" id="furia-power" disabled aria-label="Включить Фурию"><span class="track"></span><span class="power-label">...</span></label></div><p class="state">Загрузка...</p><p class="muted activity">Последний запрос: —</p><div class="stats"><div class="stat"><strong data-stat="received">0</strong><span>Запросов</span></div><div class="stat"><strong data-stat="sent">0</strong><span>Ответов</span></div><div class="stat"><strong data-stat="errors">0</strong><span>Ошибок</span></div></div>

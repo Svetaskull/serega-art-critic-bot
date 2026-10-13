@@ -1,4 +1,4 @@
-"""Frankenstein Lab v0.6: password-protected controls for the shared aiohttp host.
+"""Frankenstein Lab v0.7: password-protected controls for the shared aiohttp host.
 
 Requires LAB_PASSWORD (at least 12 characters). Without it all /lab routes return 404.
 Do not run the old local lab_server.py in the cloud.
@@ -19,6 +19,7 @@ from aiohttp import web
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path('/data') if Path('/data').is_dir() else BASE_DIR
 SETTINGS_FILE = DATA_DIR / 'lab_settings.json'
+ACTIVITY_FILE = DATA_DIR / 'lab_activity.json'
 PASSWORD = os.getenv('LAB_PASSWORD', '')
 LAB_ENABLED = len(PASSWORD) >= 12
 COOKIE_NAME = 'frankenstein_session'
@@ -42,6 +43,67 @@ EVENTS = deque(maxlen=120)
 STATS = {name: {'received': 0, 'sent': 0, 'errors': 0, 'skipped': 0,
                 'last_received': None, 'last_sent': None, 'last_error': None}
          for name in ('serega', 'furia', 'mark')}
+# Store only aggregate counts and recent event metadata, never user content.
+def _load_activity():
+    if not ACTIVITY_FILE.exists():
+        return
+    try:
+        if ACTIVITY_FILE.stat().st_size > 256 * 1024:
+            raise ValueError('Activity file is too large')
+        data = json.loads(ACTIVITY_FILE.read_text(encoding='utf-8'))
+        if not isinstance(data, dict) or data.get('version') != 1:
+            raise ValueError('Unknown activity format')
+        stats = data.get('stats')
+        events = data.get('events')
+        if not isinstance(stats, dict) or not isinstance(events, list):
+            raise ValueError('Invalid activity structure')
+        loaded = {}
+        for bot, defaults in STATS.items():
+            values = stats.get(bot)
+            if not isinstance(values, dict):
+                raise ValueError('Missing bot stats')
+            for field in ('received', 'sent', 'errors', 'skipped'):
+                if type(values.get(field)) is not int or values[field] < 0:
+                    raise ValueError('Invalid counter')
+            for field in ('last_received', 'last_sent', 'last_error'):
+                value = values.get(field)
+                if value is not None and (not isinstance(value, str) or len(value) > 64):
+                    raise ValueError('Invalid timestamp')
+            loaded[bot] = {field: values[field] for field in defaults}
+        allowed_kinds = {'received', 'sent', 'errors', 'skipped', 'power_on', 'power_off'}
+        recent = []
+        for event in events[:120]:
+            if (not isinstance(event, dict) or event.get('bot') not in STATS
+                    or event.get('kind') not in allowed_kinds
+                    or not isinstance(event.get('time'), str)
+                    or len(event['time']) > 64
+                    or not isinstance(event.get('text'), str)
+                    or len(event['text']) > 160):
+                raise ValueError('Invalid event')
+            recent.append({key: event[key] for key in ('time', 'bot', 'kind', 'text')})
+        for bot, values in loaded.items():
+            STATS[bot].update(values)
+        EVENTS.extend(recent)
+        print(f'🧪 Лаборатория: статистика восстановлена из {ACTIVITY_FILE}')
+    except (OSError, ValueError, TypeError, KeyError) as exc:
+        print(f'⚠️ Лаборатория: статистика не восстановлена ({type(exc).__name__}); начинаем с нуля.')
+
+
+def _save_activity():
+    """Called under LOCK; atomic replacement keeps the previous valid snapshot."""
+    temporary = ACTIVITY_FILE.with_suffix('.json.tmp')
+    try:
+        with temporary.open('w', encoding='utf-8') as file:
+            json.dump({'version': 1, 'stats': STATS, 'events': list(EVENTS)},
+                      file, ensure_ascii=False, separators=(',', ':'))
+        os.replace(temporary, ACTIVITY_FILE)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
+_load_activity()
+
 SESSIONS = {}  # Token -> (expiration, CSRF token); cleared on restart.
 FAILED_LOGINS = {}  # Remote IP -> recent failure timestamps.
 
@@ -122,6 +184,11 @@ def record_event(bot, kind):
             STATS[bot]['last_' + ('error' if kind == 'errors' else kind)] = now
         EVENTS.appendleft({'time': now, 'bot': bot, 'kind': kind,
                            'text': labels[kind]})
+        try:
+            _save_activity()
+        except OSError as exc:
+            # A disk issue must never interrupt a Telegram webhook.
+            print(f'⚠️ Лаборатория: статистика не сохранена ({type(exc).__name__}).')
 
 
 def _save_settings(settings):
@@ -257,7 +324,7 @@ async def status_handler(request):
     with LOCK:
         stats = {name: values.copy() for name, values in STATS.items()}
         events = list(EVENTS)[:50]
-    result = {'lab': 'online', 'version': '0.6', 'csrf': session[1],
+    result = {'lab': 'online', 'version': '0.7', 'csrf': session[1],
               'started_at': STARTED_AT, 'events': events, 'bots': {}}
     for bot, name in (('serega', 'Серёга'), ('furia', 'Фурия'), ('mark', 'Марк')):
         data = {'name': name, 'enabled': settings[f'{bot}_enabled'],
@@ -342,6 +409,6 @@ def register_routes(app):
     app.router.add_post('/lab/api/settings', settings_handler)
     app.router.add_post('/lab/api/power', power_handler)
     if LAB_ENABLED:
-        print(f'🧪 Frankenstein Lab v0.6: включена; настройки в {SETTINGS_FILE}')
+        print(f'🧪 Frankenstein Lab v0.7: включена; настройки в {SETTINGS_FILE}')
     else:
         print('🔒 Frankenstein Lab отключена: задай LAB_PASSWORD длиной от 12 символов.')
