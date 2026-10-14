@@ -490,8 +490,8 @@ async def channel_post_handler(
 # СЕРЁГА 2.2 — ЛИЧНЫЙ АРТ-КОНСУЛЬТАНТ
 # =========================================================
 # Этот режим независим от комментариев к постам канала.
-# Доступ разрешён только Telegram ID из SEREGA_PRIVATE_ALLOWED_IDS.
-# Без списка доступ закрыт, чтобы посторонние не тратили API-бюджет.
+# Доступ: секрет Netrun + динамический список Лаборатории.
+# Без обоих списков доступ закрыт, чтобы посторонние не тратили API-бюджет.
 
 PRIVATE_ALLOWED_IDS = {
     int(value.strip())
@@ -545,7 +545,10 @@ PRIVATE_INSTRUCTIONS = """Ты — Серёга, опытный арт-крит�
 def private_access_allowed(message: Message) -> bool:
     return (
         message.from_user is not None
-        and message.from_user.id in PRIVATE_ALLOWED_IDS
+        and (
+            message.from_user.id in PRIVATE_ALLOWED_IDS
+            or lab_control.is_private_user_allowed(message.from_user.id)
+        )
     )
 
 
@@ -698,6 +701,9 @@ def private_split_text(text: str, limit: int = PRIVATE_TELEGRAM_CHUNK_CHARS) -> 
 
 async def private_answer(message: Message, text: str):
     for part in private_split_text(text):
+        # Access can be revoked while an AI response is being generated.
+        if not private_access_allowed(message):
+            return
         await message.answer(part)
         lab_control.record_event("serega", "sent")
 
@@ -712,6 +718,9 @@ async def private_process_messages(messages: list[Message]):
     async with lock:
         try:
             if not lab_control.get_bot_enabled("serega"):
+                lab_control.record_event("serega", "skipped")
+                return
+            if not private_access_allowed(message):
                 lab_control.record_event("serega", "skipped")
                 return
 
@@ -803,7 +812,7 @@ async def private_process_messages(messages: list[Message]):
                 history_question,
             )
 
-            if not lab_control.get_bot_enabled("serega"):
+            if not lab_control.get_bot_enabled("serega") or not private_access_allowed(message):
                 lab_control.record_event("serega", "skipped")
                 return
 
@@ -818,7 +827,7 @@ async def private_process_messages(messages: list[Message]):
         except Exception as exc:
             lab_control.record_event("serega", "errors")
             print("❌ Серёга 2.2: ошибка личного режима:", type(exc).__name__, str(exc)[:300])
-            if lab_control.get_bot_enabled("serega"):
+            if lab_control.get_bot_enabled("serega") and private_access_allowed(message):
                 await private_answer(message, "Не смог обработать запрос. Попробуй ещё раз чуть позже.")
 
 
