@@ -1,4 +1,4 @@
-"""Frankenstein Lab v0.8: password-protected controls for the shared aiohttp host.
+"""Frankenstein Lab v0.9: password-protected controls for the shared aiohttp host.
 
 Requires LAB_PASSWORD (at least 12 characters). Without it all /lab routes return 404.
 Do not run the old local lab_server.py in the cloud.
@@ -21,6 +21,8 @@ DATA_DIR = Path('/data') if Path('/data').is_dir() else BASE_DIR
 SETTINGS_FILE = DATA_DIR / 'lab_settings.json'
 ACTIVITY_FILE = DATA_DIR / 'lab_activity.json'
 ACCESS_FILE = DATA_DIR / 'lab_access.json'
+TESTERS_FILE = DATA_DIR / 'lab_testers.json'
+TESTER_REQUEST_LIMIT_MAX = 10000
 ACCESS_LIMIT = 30
 # IDs from Netrun remain allowed and cannot be revoked from the dashboard.
 ENV_PRIVATE_ALLOWED_IDS = {
@@ -172,12 +174,121 @@ def _save_access(users):
 MANAGED_USERS, ACCESS_LOAD_ERROR = _load_access()
 
 
+# Private tester counters/limits live in their own file. Existing v0.8 access
+# lists remain unchanged. No messages, pictures or chat history are stored.
+def _load_testers():
+    if not TESTERS_FILE.exists():
+        return {}, False
+    try:
+        if TESTERS_FILE.stat().st_size > 64 * 1024:
+            raise ValueError('Tester file too large')
+        data = json.loads(TESTERS_FILE.read_text(encoding='utf-8'))
+        if (not isinstance(data, dict) or data.get('version') != 1
+                or not isinstance(data.get('users'), dict)
+                or len(data['users']) > 128):
+            raise ValueError('Invalid tester data')
+        result = {}
+        for raw_id, item in data['users'].items():
+            uid = _valid_user_id(raw_id)
+            if uid is None or not isinstance(item, dict):
+                raise ValueError('Invalid tester ID')
+            requests = item.get('requests')
+            limit = item.get('limit')
+            last_active = item.get('last_active')
+            if (type(requests) is not int or requests < 0 or requests > 1_000_000_000
+                    or type(limit) is not int or not 0 <= limit <= TESTER_REQUEST_LIMIT_MAX
+                    or (last_active is not None and
+                        (not isinstance(last_active, str) or len(last_active) > 64))):
+                raise ValueError('Invalid tester values')
+            result[uid] = {'requests': requests, 'limit': limit, 'last_active': last_active}
+        print(f'🧪 Лаборатория: статистика тестировщиков восстановлена ({len(result)})')
+        return result, False
+    except (OSError, ValueError, TypeError) as exc:
+        print(f'⚠️ Лаборатория: файл тестировщиков повреждён ({type(exc).__name__}); лимиты заблокированы.')
+        return {}, True
+
+
+def _save_testers(users):
+    temporary = TESTERS_FILE.with_suffix('.json.tmp')
+    try:
+        with temporary.open('w', encoding='utf-8') as file:
+            json.dump({'version': 1, 'users': {
+                str(uid): data for uid, data in sorted(users.items())
+            }}, file, ensure_ascii=False, indent=2)
+        os.replace(temporary, TESTERS_FILE)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
+TESTERS, TESTERS_LOAD_ERROR = _load_testers()
+
+
+def _tester_data(user_id):
+    return TESTERS.get(user_id, {'requests': 0, 'limit': 0, 'last_active': None}).copy()
+
+
+def _private_allowed_unlocked(user_id):
+    return user_id in ENV_PRIVATE_ALLOWED_IDS or user_id in MANAGED_USERS
+
+
+def touch_private_user(user_id):
+    """Record an authorized tester's command activity, not message contents."""
+    if type(user_id) is not int or user_id <= 0:
+        return
+    with LOCK:
+        if TESTERS_LOAD_ERROR or not _private_allowed_unlocked(user_id):
+            return
+        updated = TESTERS.copy()
+        data = _tester_data(user_id)
+        data['last_active'] = datetime.now(timezone.utc).isoformat(timespec='seconds')
+        updated[user_id] = data
+        try:
+            _save_testers(updated)
+        except OSError as exc:
+            print(f'⚠️ Лаборатория: активность не сохранена ({type(exc).__name__}).')
+            return
+        TESTERS.clear()
+        TESTERS.update(updated)
+
+
+def reserve_private_request(user_id):
+    """Atomically charge ONE AI request (including a Telegram album).
+
+    Returns ok / limit / denied / unavailable. Fail closed if the file cannot
+    be read or written, so a disk failure cannot bypass paid-request limits.
+    """
+    if type(user_id) is not int or user_id <= 0:
+        return 'denied'
+    with LOCK:
+        if not _private_allowed_unlocked(user_id):
+            return 'denied'
+        if TESTERS_LOAD_ERROR:
+            return 'unavailable'
+        data = _tester_data(user_id)
+        if data['limit'] and data['requests'] >= data['limit']:
+            return 'limit'
+        if data['requests'] >= 1_000_000_000:
+            return 'limit'
+        data['requests'] += 1
+        data['last_active'] = datetime.now(timezone.utc).isoformat(timespec='seconds')
+        updated = TESTERS | {user_id: data}
+        try:
+            _save_testers(updated)
+        except OSError as exc:
+            print(f'⚠️ Лаборатория: запрос не учтён ({type(exc).__name__}).')
+            return 'unavailable'
+        TESTERS.clear()
+        TESTERS.update(updated)
+        return 'ok'
+
+
 def is_private_user_allowed(user_id):
     """Live access check. A removed user is denied without a restart."""
     if type(user_id) is not int or user_id <= 0:
         return False
     with LOCK:
-        return user_id in ENV_PRIVATE_ALLOWED_IDS or user_id in MANAGED_USERS
+        return _private_allowed_unlocked(user_id)
 
 
 SESSIONS = {}  # Token -> (expiration, CSRF token); cleared on restart.
@@ -402,12 +513,20 @@ async def status_handler(request):
         events = list(EVENTS)[:50]
         managed_users = sorted(MANAGED_USERS.items())
         access_load_error = ACCESS_LOAD_ERROR
-    result = {'lab': 'online', 'version': '0.8', 'csrf': session[1],
+    result = {'lab': 'online', 'version': '0.9', 'csrf': session[1],
               'started_at': STARTED_AT, 'events': events, 'bots': {},
               'access': {'managed': [{'id': str(uid), 'label': label}
                                      for uid, label in managed_users],
                          'netrun_ids': [str(uid) for uid in sorted(ENV_PRIVATE_ALLOWED_IDS)],
-                         'limit': ACCESS_LIMIT, 'read_error': access_load_error}}
+                         'limit': ACCESS_LIMIT, 'read_error': access_load_error,
+                          'testers_read_error': TESTERS_LOAD_ERROR}}
+    with LOCK:
+        for entry in result['access']['managed']:
+            entry.update(_tester_data(int(entry['id'])))
+        result['access']['netrun'] = [
+            {'id': str(uid), **_tester_data(uid)}
+            for uid in sorted(ENV_PRIVATE_ALLOWED_IDS)
+        ]
     for bot, name in (('serega', 'Серёга'), ('furia', 'Фурия'), ('mark', 'Марк')):
         data = {'name': name, 'enabled': settings[f'{bot}_enabled'],
                 'stats': stats[bot]}
@@ -539,7 +658,77 @@ async def access_remove_handler(request):
             raise web.HTTPInternalServerError(text='Не удалось сохранить список доступа')
         MANAGED_USERS.clear()
         MANAGED_USERS.update(updated)
+        if not TESTERS_LOAD_ERROR and user_id not in ENV_PRIVATE_ALLOWED_IDS and user_id in TESTERS:
+            updated_testers = TESTERS.copy()
+            updated_testers.pop(user_id, None)
+            try:
+                _save_testers(updated_testers)
+                TESTERS.clear()
+                TESTERS.update(updated_testers)
+            except OSError:
+                print('⚠️ Лаборатория: не удалось очистить статистику удалённого участника')
     print('🧪 Лаборатория: пользователь удалён из списка доступа')
+    return _security_headers(web.json_response({'success': True}))
+
+
+async def tester_limit_handler(request):
+    session = _require_session(request)
+    _require_csrf(request, session)
+    if request.content_length is None or request.content_length > 256:
+        raise web.HTTPBadRequest(text='Неверный размер запроса')
+    try:
+        data = await request.json()
+        if not isinstance(data, dict):
+            raise ValueError('Неверный запрос')
+        user_id = _valid_user_id(data.get('id'))
+        limit = data.get('limit')
+        if user_id is None or type(limit) is not int or not 0 <= limit <= TESTER_REQUEST_LIMIT_MAX:
+            raise ValueError('Лимит должен быть целым числом от 0 до 10000')
+    except (ValueError, TypeError) as exc:
+        raise web.HTTPBadRequest(text=str(exc))
+    with LOCK:
+        if TESTERS_LOAD_ERROR:
+            raise web.HTTPServiceUnavailable(text='Файл статистики повреждён. Изменения заблокированы.')
+        if not _private_allowed_unlocked(user_id):
+            raise web.HTTPNotFound(text='Участник не найден')
+        item = _tester_data(user_id)
+        item['limit'] = limit
+        updated = TESTERS | {user_id: item}
+        try:
+            _save_testers(updated)
+        except OSError:
+            raise web.HTTPInternalServerError(text='Не удалось сохранить лимит')
+        TESTERS.clear()
+        TESTERS.update(updated)
+    return _security_headers(web.json_response({'success': True}))
+
+
+async def tester_reset_handler(request):
+    session = _require_session(request)
+    _require_csrf(request, session)
+    if request.content_length is None or request.content_length > 256:
+        raise web.HTTPBadRequest(text='Неверный размер запроса')
+    try:
+        data = await request.json()
+        user_id = _valid_user_id(data.get('id')) if isinstance(data, dict) else None
+        if user_id is None:
+            raise ValueError('Неверный Telegram ID')
+    except (ValueError, TypeError) as exc:
+        raise web.HTTPBadRequest(text=str(exc))
+    with LOCK:
+        if TESTERS_LOAD_ERROR:
+            raise web.HTTPServiceUnavailable(text='Файл статистики повреждён. Изменения заблокированы.')
+        if not _private_allowed_unlocked(user_id):
+            raise web.HTTPNotFound(text='Участник не найден')
+        item = _tester_data(user_id)
+        item['requests'] = 0
+        updated = TESTERS | {user_id: item}
+        try:
+            _save_testers(updated)
+        except OSError:
+            raise web.HTTPInternalServerError(text='Не удалось сбросить счётчик')
+        TESTERS.clear()
+        TESTERS.update(updated)
     return _security_headers(web.json_response({'success': True}))
 
 
@@ -557,7 +746,9 @@ def register_routes(app):
     app.router.add_post('/lab/api/power', power_handler)
     app.router.add_post('/lab/api/access/add', access_add_handler)
     app.router.add_post('/lab/api/access/remove', access_remove_handler)
+    app.router.add_post('/lab/api/testers/limit', tester_limit_handler)
+    app.router.add_post('/lab/api/testers/reset', tester_reset_handler)
     if LAB_ENABLED:
-        print(f'🧪 Frankenstein Lab v0.8: включена; настройки в {SETTINGS_FILE}')
+        print(f'🧪 Frankenstein Lab v0.9: включена; настройки в {SETTINGS_FILE}')
     else:
         print('🔒 Frankenstein Lab отключена: задай LAB_PASSWORD длиной от 12 символов.')

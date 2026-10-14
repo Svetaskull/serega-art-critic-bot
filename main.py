@@ -349,6 +349,7 @@ async def start_handler(
 
     if message.chat.type == "private":
         if private_access_allowed(message):
+            lab_control.touch_private_user(message.from_user.id)
             await message.answer(
                 "Серёга на месте. 🎨 Присылай изображение и напиши, "
                 "что именно проверить. Можешь задавать уточняющие вопросы. "
@@ -795,6 +796,18 @@ async def private_process_messages(messages: list[Message]):
             else:
                 question = "Разбери текущие работы и ответь на мой вопрос."
 
+            # Один альбом = один платный запрос. Резервируем до вызова ИИ,
+            # атомарно и с сохранением в /data; ошибки ИИ тоже расходуют квоту.
+            quota = lab_control.reserve_private_request(message.from_user.id)
+            if quota != 'ok':
+                if quota == 'limit':
+                    await private_answer(message, "Лимит запросов исчерпан. Попроси администратора Лаборатории увеличить его или сбросить счётчик.")
+                elif quota == 'unavailable':
+                    await private_answer(message, "Учёт запросов временно недоступен. Попробуй позже.")
+                else:
+                    lab_control.record_event('serega', 'skipped')
+                return
+
             # Сохраняем набор только после проверки всех лимитов.
             state["images"] = images
             history_question = question
@@ -859,6 +872,7 @@ async def private_reset_handler(message: Message):
         await message.answer("Личный режим Серёги пока не открыт для этого аккаунта.")
         return
 
+    lab_control.touch_private_user(message.from_user.id)
     chat_id = message.chat.id
     # Отменяем ещё не собранные альбомы, чтобы они не вернулись после /reset.
     for key, album in list(private_albums.items()):
@@ -880,6 +894,7 @@ async def private_images_handler(message: Message):
     if not private_access_allowed(message):
         await message.answer("Личный режим Серёги пока не открыт для этого аккаунта.")
         return
+    lab_control.touch_private_user(message.from_user.id)
     lock = private_chat_locks.setdefault(message.chat.id, asyncio.Lock())
     async with lock:
         count = len(private_session(message.chat.id)["images"])
