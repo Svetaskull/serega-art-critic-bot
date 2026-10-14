@@ -1,4 +1,4 @@
-"""Frankenstein Lab v0.7: password-protected controls for the shared aiohttp host.
+"""Frankenstein Lab v0.8: password-protected controls for the shared aiohttp host.
 
 Requires LAB_PASSWORD (at least 12 characters). Without it all /lab routes return 404.
 Do not run the old local lab_server.py in the cloud.
@@ -20,6 +20,13 @@ BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path('/data') if Path('/data').is_dir() else BASE_DIR
 SETTINGS_FILE = DATA_DIR / 'lab_settings.json'
 ACTIVITY_FILE = DATA_DIR / 'lab_activity.json'
+ACCESS_FILE = DATA_DIR / 'lab_access.json'
+ACCESS_LIMIT = 30
+# IDs from Netrun remain allowed and cannot be revoked from the dashboard.
+ENV_PRIVATE_ALLOWED_IDS = {
+    int(value.strip()) for value in os.getenv('SEREGA_PRIVATE_ALLOWED_IDS', '').split(',')
+    if value.strip().isdigit() and int(value.strip()) > 0
+}
 PASSWORD = os.getenv('LAB_PASSWORD', '')
 LAB_ENABLED = len(PASSWORD) >= 12
 COOKIE_NAME = 'frankenstein_session'
@@ -103,6 +110,75 @@ def _save_activity():
 
 
 _load_activity()
+
+# Separately persisted private-chat allowlist; independent of bot settings.
+# Invalid or damaged data fails closed; do not overwrite it automatically.
+def _valid_user_id(value):
+    if type(value) is not str or not value.isascii() or not value.isdecimal():
+        return None
+    if not 1 <= len(value) <= 19 or value[0] == '0':
+        return None
+    number = int(value)
+    return number if 0 < number <= 9223372036854775807 else None
+
+
+def _valid_label(value):
+    return (type(value) is str and len(value) <= 60
+            and all(ord(char) >= 32 and ord(char) != 127 for char in value))
+
+
+def _load_access():
+    if not ACCESS_FILE.exists():
+        return {}, False
+    try:
+        if ACCESS_FILE.stat().st_size > 16 * 1024:
+            raise ValueError('Access file too large')
+        data = json.loads(ACCESS_FILE.read_text(encoding='utf-8'))
+        if not isinstance(data, dict) or data.get('version') != 1 or not isinstance(data.get('users'), list):
+            raise ValueError('Unknown access file format')
+        users = data['users']
+        if len(users) > ACCESS_LIMIT:
+            raise ValueError('Too many users')
+        result = {}
+        for item in users:
+            if not isinstance(item, dict):
+                raise ValueError('Invalid user')
+            user_id = _valid_user_id(item.get('id'))
+            label = item.get('label')
+            if user_id is None or not _valid_label(label) or user_id in result:
+                raise ValueError('Invalid or duplicate user')
+            result[user_id] = label.strip()
+        print(f'🧪 Лаборатория: список доступа восстановлен ({len(result)} пользователей)')
+        return result, False
+    except (OSError, ValueError, TypeError) as exc:
+        print(f'⚠️ Лаборатория: список доступа повреждён ({type(exc).__name__}); управление заблокировано.')
+        return {}, True
+
+
+def _save_access(users):
+    temporary = ACCESS_FILE.with_suffix('.json.tmp')
+    try:
+        with temporary.open('w', encoding='utf-8') as file:
+            json.dump({'version': 1, 'users': [
+                {'id': str(user_id), 'label': label}
+                for user_id, label in sorted(users.items())
+            ]}, file, ensure_ascii=False, indent=2)
+        os.replace(temporary, ACCESS_FILE)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
+MANAGED_USERS, ACCESS_LOAD_ERROR = _load_access()
+
+
+def is_private_user_allowed(user_id):
+    """Live access check. A removed user is denied without a restart."""
+    if type(user_id) is not int or user_id <= 0:
+        return False
+    with LOCK:
+        return user_id in ENV_PRIVATE_ALLOWED_IDS or user_id in MANAGED_USERS
+
 
 SESSIONS = {}  # Token -> (expiration, CSRF token); cleared on restart.
 FAILED_LOGINS = {}  # Remote IP -> recent failure timestamps.
@@ -324,8 +400,14 @@ async def status_handler(request):
     with LOCK:
         stats = {name: values.copy() for name, values in STATS.items()}
         events = list(EVENTS)[:50]
-    result = {'lab': 'online', 'version': '0.7', 'csrf': session[1],
-              'started_at': STARTED_AT, 'events': events, 'bots': {}}
+        managed_users = sorted(MANAGED_USERS.items())
+        access_load_error = ACCESS_LOAD_ERROR
+    result = {'lab': 'online', 'version': '0.8', 'csrf': session[1],
+              'started_at': STARTED_AT, 'events': events, 'bots': {},
+              'access': {'managed': [{'id': str(uid), 'label': label}
+                                     for uid, label in managed_users],
+                         'netrun_ids': [str(uid) for uid in sorted(ENV_PRIVATE_ALLOWED_IDS)],
+                         'limit': ACCESS_LIMIT, 'read_error': access_load_error}}
     for bot, name in (('serega', 'Серёга'), ('furia', 'Фурия'), ('mark', 'Марк')):
         data = {'name': name, 'enabled': settings[f'{bot}_enabled'],
                 'stats': stats[bot]}
@@ -396,6 +478,71 @@ async def power_handler(request):
     return _security_headers(web.json_response({'success': True, 'bot': bot, 'enabled': enabled}))
 
 
+async def access_add_handler(request):
+    session = _require_session(request)
+    _require_csrf(request, session)
+    if request.content_length is None or request.content_length > 512:
+        raise web.HTTPBadRequest(text='Неверный размер запроса')
+    try:
+        data = await request.json()
+        if not isinstance(data, dict):
+            raise ValueError('Ожидается объект')
+        user_id = _valid_user_id(data.get('id'))
+        label = data.get('label', '')
+        if user_id is None or not _valid_label(label):
+            raise ValueError('Неверный Telegram ID или подпись')
+        label = label.strip()
+    except (ValueError, TypeError) as exc:
+        raise web.HTTPBadRequest(text=str(exc))
+    with LOCK:
+        if ACCESS_LOAD_ERROR:
+            raise web.HTTPServiceUnavailable(text='Файл доступа повреждён. Исправь его вручную.')
+        if user_id in ENV_PRIVATE_ALLOWED_IDS:
+            raise web.HTTPConflict(text='Этот ID уже разрешён через секрет Netrun')
+        if user_id in MANAGED_USERS:
+            raise web.HTTPConflict(text='Этот Telegram ID уже добавлен')
+        if len(MANAGED_USERS) >= ACCESS_LIMIT:
+            raise web.HTTPConflict(text='Достигнут лимит пользователей')
+        updated = MANAGED_USERS | {user_id: label}
+        try:
+            _save_access(updated)
+        except OSError:
+            raise web.HTTPInternalServerError(text='Не удалось сохранить список доступа')
+        MANAGED_USERS.clear()
+        MANAGED_USERS.update(updated)
+    print('🧪 Лаборатория: пользователь добавлен в список доступа')
+    return _security_headers(web.json_response({'success': True}))
+
+
+async def access_remove_handler(request):
+    session = _require_session(request)
+    _require_csrf(request, session)
+    if request.content_length is None or request.content_length > 256:
+        raise web.HTTPBadRequest(text='Неверный размер запроса')
+    try:
+        data = await request.json()
+        user_id = _valid_user_id(data.get('id')) if isinstance(data, dict) else None
+        if user_id is None:
+            raise ValueError('Неверный Telegram ID')
+    except (ValueError, TypeError) as exc:
+        raise web.HTTPBadRequest(text=str(exc))
+    with LOCK:
+        if ACCESS_LOAD_ERROR:
+            raise web.HTTPServiceUnavailable(text='Файл доступа повреждён. Исправь его вручную.')
+        if user_id not in MANAGED_USERS:
+            raise web.HTTPNotFound(text='Пользователь не найден в списке Лаборатории')
+        updated = MANAGED_USERS.copy()
+        del updated[user_id]
+        try:
+            _save_access(updated)
+        except OSError:
+            raise web.HTTPInternalServerError(text='Не удалось сохранить список доступа')
+        MANAGED_USERS.clear()
+        MANAGED_USERS.update(updated)
+    print('🧪 Лаборатория: пользователь удалён из списка доступа')
+    return _security_headers(web.json_response({'success': True}))
+
+
 async def redirect_handler(request):
     raise web.HTTPFound('/lab/')
 
@@ -408,7 +555,9 @@ def register_routes(app):
     app.router.add_get('/lab/api/status', status_handler)
     app.router.add_post('/lab/api/settings', settings_handler)
     app.router.add_post('/lab/api/power', power_handler)
+    app.router.add_post('/lab/api/access/add', access_add_handler)
+    app.router.add_post('/lab/api/access/remove', access_remove_handler)
     if LAB_ENABLED:
-        print(f'🧪 Frankenstein Lab v0.7: включена; настройки в {SETTINGS_FILE}')
+        print(f'🧪 Frankenstein Lab v0.8: включена; настройки в {SETTINGS_FILE}')
     else:
         print('🔒 Frankenstein Lab отключена: задай LAB_PASSWORD длиной от 12 символов.')
