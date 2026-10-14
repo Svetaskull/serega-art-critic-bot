@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Frankenstein Lab · v0.8</title>
+<title>Frankenstein Lab · v0.9</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,'Segoe UI',Arial,sans-serif;background:#101218;color:#f3f5f8}
 *{box-sizing:border-box}body{margin:0;padding:28px 20px 60px}main{max-width:1200px;margin:auto}
@@ -15,10 +15,17 @@
 .access{margin-top:22px;background:#1b1e26;border:1px solid #313641;border-radius:18px;padding:21px}.access-form{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px;align-items:center}.access-form input{background:#101218;color:#f3f5f8;border:1px solid #505967;border-radius:10px;padding:11px 12px;min-width:0;font:inherit}.access-form input:first-child{flex:1 1 220px}.access-form input:nth-child(2){flex:1 1 180px}.access-form button,.remove-access{border:0;border-radius:10px;padding:11px 15px;font:inherit;font-weight:650;cursor:pointer}.access-form button{background:#71d89a;color:#112016}.access-form button:disabled,.remove-access:disabled{opacity:.5;cursor:wait}.access-list{list-style:none;padding:0;margin:12px 0}.access-list li{display:flex;justify-content:space-between;gap:12px;align-items:center;border-top:1px solid #30343d;padding:12px 0;flex-wrap:wrap}.access-user{min-width:0;overflow-wrap:anywhere}.access-user strong{display:block}.access-user span{color:#9da9ba;font-size:12px}.remove-access{background:#4a2830;color:#ffb5bd;font-size:13px}.access-error{color:#ff9c9c;min-height:18px;font-size:13px}.access-ok{color:#82e1a9}.log{margin-top:22px;background:#1b1e26;border:1px solid #313641;border-radius:18px;padding:21px}.log-head{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}.events{list-style:none;margin:17px 0 0;padding:0;max-height:410px;overflow:auto}.events li{display:grid;grid-template-columns:145px 100px 1fr;gap:12px;align-items:center;padding:11px 2px;border-top:1px solid #2c3039;font-size:13px}.events time{color:#98a5b6}.events .who{font-weight:650}.events .kind{color:#c9d1dd}.events .kind.errors{color:#ff9999}.events .kind.sent{color:#84dfa7}.small{color:#97a4b5;font-size:12px;line-height:1.5}.error-line{color:#ff9c9c;font-size:13px;min-height:18px}
 @media(max-width:960px){.bots{grid-template-columns:1fr}.events li{grid-template-columns:120px 65px 1fr;gap:8px}}
 @media(max-width:500px){body{padding:20px 12px 45px}.card,.log,.access{padding:16px}.events li{grid-template-columns:1fr 1fr;gap:2px}.events .kind{grid-column:1/-1;padding-bottom:3px}}
+
+.tester-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px}
+.tester-controls label{color:#b8c2cf;font-size:12px}
+.tester-controls input{width:95px;background:#101218;color:#f3f5f8;border:1px solid #505967;border-radius:9px;padding:8px;font:inherit}
+.tester-controls button{border:1px solid #505967;background:#252c36;color:#e4ecf5;border-radius:9px;padding:8px 11px;cursor:pointer;font-size:12px}
+.tester-controls button:disabled,.tester-controls input:disabled{opacity:.5;cursor:wait}
+.access-user .tester-meta{display:block;margin-top:5px;color:#b8c2cf;font-size:12px}
 </style>
 </head>
 <body><main>
-<div class="header"><div><h1>🧪 Лаборатория Франкенштейна</h1><p class="subtitle">Центр управления электронными долбоёбами · v0.8</p></div>
+<div class="header"><div><h1>🧪 Лаборатория Франкенштейна</h1><p class="subtitle">Центр управления электронными долбоёбами · v0.9</p></div>
 <div class="actions"><span id="lab-status" class="badge">Подключаемся...</span><button id="logout" class="logout" type="button">Выйти</button></div></div>
 <div class="notice">⚡ Переключатель «ВЫКЛ» запрещает боту отправлять новые ответы, включая продолжение разговоров. Уже отправленные сообщения не удаляются. Статистика и последние 120 событий сохраняются в /data и восстанавливаются после перезапуска Netrun. Статистика не проверяет доступность Telegram API.</div>
 <div class="bots">
@@ -34,7 +41,8 @@
 <p class="muted">Добавляй участников закрытого тестирования по числовому Telegram ID. Изменения вступают в силу сразу и сохраняются после перезапуска. Пользователи из секрета Netrun сохраняют доступ независимо от этого списка.</p>
 <form id="access-form" class="access-form"><input id="access-id" type="text" inputmode="numeric" pattern="[1-9][0-9]*" maxlength="19" placeholder="Telegram ID" aria-label="Telegram ID" required autocomplete="off"><input id="access-label" type="text" maxlength="60" placeholder="Имя или пометка (необязательно)" aria-label="Имя или пометка" autocomplete="off"><button id="access-add" type="submit">Добавить</button></form>
 <p id="access-feedback" class="access-error" role="status"></p><p id="access-count" class="small">Загружаем список...</p><ul id="access-users" class="access-list"></ul>
-<p class="small" id="access-netrun">Список Netrun: загружается...</p></section>
+<p class="small" id="access-netrun">Список Netrun: загружается...</p><ul id="netrun-users" class="access-list"></ul>
+<p class="small">Запрос = одно обращение к ИИ; альбом считается одним запросом. 0 означает без лимита. Счётчик учитывает и неудачные попытки обращения к ИИ. Данные v0.9 считаются с момента обновления, старые запросы не восстанавливаются.</p></section>
 <section class="log"><div class="log-head"><h3>📋 Журнал активности</h3><span class="small">Последние 50 событий · обновление каждые 15 секунд</span></div><p class="small">В журнале только тип события, бот и время. Тексты сообщений и данные пользователей в журнал не записываются.</p><p class="error-line" id="connection-error"></p><ul class="events" id="events"><li>Ожидаем события...</li></ul></section>
 </main>
 <script>
@@ -53,22 +61,57 @@ async function saveSettings(bot){if(busy.has(bot))return;busy.add(bot);enableSli
 async function savePower(bot,on){if(busy.has(bot))return;busy.add(bot);get(`${bot}-power`).disabled=true;if(adjustable.includes(bot))enableSliders(bot,false);notice(bot,'⏳ Меняем режим...');try{const r=await fetch('/lab/api/power',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},body:JSON.stringify({bot,enabled:on})});if(r.status===401){location.assign('/lab/');return;}if(!r.ok)throw Error(`HTTP ${r.status}`);powerState[bot]=on;showPower(bot,on);notice(bot,on?'✓ Бот включён':'✓ Ответы бота отключены','ok');}catch(e){showPower(bot,powerState[bot]);notice(bot,'✕ Не удалось изменить режим','bad');console.error(e);}finally{busy.delete(bot);get(`${bot}-power`).disabled=false;if(adjustable.includes(bot))enableSliders(bot,true);}}
 let accessBusy=false;
 function accessFeedback(text,ok=false){const el=get('access-feedback');el.textContent=text;el.className=ok?'access-error access-ok':'access-error';}
+function renderTesterRow(user,managed,readError){
+  const li=document.createElement('li');const info=document.createElement('div');info.className='access-user';
+  const name=document.createElement('strong');name.textContent=managed?(user.label||'Без подписи'):'Доступ через Netrun';
+  const id=document.createElement('span');id.textContent=`Telegram ID: ${user.id}`;
+  const meta=document.createElement('span');meta.className='tester-meta';
+  meta.textContent=`Запросов к ИИ: ${user.requests||0} · Последняя активность: ${fmtTime(user.last_active)}`;
+  info.append(name,id,meta);
+  const controls=document.createElement('div');controls.className='tester-controls';
+  const label=document.createElement('label');label.textContent='Лимит запросов';
+  const input=document.createElement('input');input.type='number';input.min='0';input.max='10000';input.step='1';input.value=String(user.limit||0);input.setAttribute('aria-label',`Лимит запросов ${user.id}`);
+  const save=document.createElement('button');save.type='button';save.textContent='Сохранить лимит';
+  save.addEventListener('click',()=>saveTesterLimit(user.id,input));
+  const reset=document.createElement('button');reset.type='button';reset.textContent='Сбросить счётчик';
+  reset.addEventListener('click',()=>resetTester(user.id));
+  controls.append(label,input,save,reset);
+  if(managed){
+    const remove=document.createElement('button');remove.type='button';remove.className='remove-access';remove.textContent='Отключить доступ';
+    remove.addEventListener('click',()=>removeAccess(user.id));controls.append(remove);
+  }
+  for(const el of controls.querySelectorAll('button,input'))el.disabled=accessBusy||readError;
+  li.append(info,controls);return li;
+}
 function renderAccess(access){
   if(!access)return;
-  const managed=access.managed||[], netrun=access.netrun_ids||[];
+  const managed=access.managed||[],netrun=access.netrun||[];
   get('access-count').textContent=`Участники Лаборатории: ${managed.length} из ${access.limit}`;
-  get('access-netrun').textContent=netrun.length?`Доступ через Netrun (удаляется только в секретах Netrun): ${netrun.join(', ')}`:'Доступ через Netrun: список пуст';
+  get('access-netrun').textContent=`Доступ через Netrun: ${netrun.length} · удаляется только в секретах Netrun`;
   get('access-add').disabled=accessBusy||access.read_error;
   const list=get('access-users');list.replaceChildren();
-  if(access.read_error){accessFeedback('⚠️ Файл списка доступа повреждён. Изменения заблокированы до исправления на сервере.');return;}
-  if(!managed.length){const li=document.createElement('li');li.className='small';li.textContent='Пока никого не добавили.';list.append(li);return;}
-  for(const user of managed){
-    const li=document.createElement('li');const info=document.createElement('div');info.className='access-user';
-    const name=document.createElement('strong');name.textContent=user.label||'Без подписи';
-    const id=document.createElement('span');id.textContent=`Telegram ID: ${user.id}`;info.append(name,id);
-    const button=document.createElement('button');button.type='button';button.className='remove-access';button.textContent='Отключить доступ';button.disabled=accessBusy;
-    button.addEventListener('click',()=>removeAccess(user.id));li.append(info,button);list.append(li);
-  }
+  const envList=get('netrun-users');envList.replaceChildren();
+  if(access.read_error){accessFeedback('⚠️ Файл списка доступа повреждён. Изменения заблокированы до исправления на сервере.');}
+  if(access.testers_read_error){accessFeedback('⚠️ Файл статистики тестировщиков повреждён. Лимиты и обращения к ИИ временно заблокированы.');}
+  if(!managed.length){const li=document.createElement('li');li.className='small';li.textContent='Пока никого не добавили.';list.append(li);}
+  for(const user of managed)list.append(renderTesterRow(user,true,access.testers_read_error||access.read_error));
+  for(const user of netrun)envList.append(renderTesterRow(user,false,access.testers_read_error));
+}
+async function saveTesterLimit(id,input){
+  if(accessBusy)return;
+  const raw=input.value.trim();const limit=Number(raw);
+  if(!/^(0|[1-9][0-9]*)$/.test(raw)||!Number.isInteger(limit)||limit>10000){accessFeedback('Лимит должен быть целым числом от 0 до 10000.');return;}
+  accessBusy=true;accessFeedback('⏳ Сохраняем лимит...');
+  try{await accessRequest('/lab/api/testers/limit',{id,limit});accessFeedback('✓ Лимит сохранён','ok');}
+  catch(e){accessFeedback(`✕ ${e.message}`);}
+  finally{accessBusy=false;await refresh();}
+}
+async function resetTester(id){
+  if(accessBusy||!confirm(`Сбросить счётчик запросов Telegram ID ${id}? Лимит сохранится.`))return;
+  accessBusy=true;accessFeedback('⏳ Сбрасываем счётчик...');
+  try{await accessRequest('/lab/api/testers/reset',{id});accessFeedback('✓ Счётчик сброшен','ok');}
+  catch(e){accessFeedback(`✕ ${e.message}`);}
+  finally{accessBusy=false;await refresh();}
 }
 async function accessRequest(url,body){
   const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},body:JSON.stringify(body)});
