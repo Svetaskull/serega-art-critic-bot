@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Frankenstein Lab · v0.9</title>
+<title>Frankenstein Lab · v1.0</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,'Segoe UI',Arial,sans-serif;background:#101218;color:#f3f5f8}
 *{box-sizing:border-box}body{margin:0;padding:28px 20px 60px}main{max-width:1200px;margin:auto}
@@ -22,21 +22,74 @@
 .tester-controls button{border:1px solid #505967;background:#252c36;color:#e4ecf5;border-radius:9px;padding:8px 11px;cursor:pointer;font-size:12px}
 .tester-controls button:disabled,.tester-controls input:disabled{opacity:.5;cursor:wait}
 .access-user .tester-meta{display:block;margin-top:5px;color:#b8c2cf;font-size:12px}
+
+/* Lab v1.0: daily analytics, no external JS or CSS dependencies. */
+.analytics{margin-top:22px;background:#1b1e26;border:1px solid #313641;border-radius:18px;padding:21px;min-width:0}
+.analytics-head{display:flex;justify-content:space-between;align-items:start;gap:16px;flex-wrap:wrap}
+.analytics-head p{margin:7px 0 0}
+.analytics-controls{display:flex;gap:10px;align-items:end;flex-wrap:wrap}
+.analytics-controls label{display:grid;gap:5px;font-size:12px;color:#b9c5d5}
+.analytics-controls select{background:#101218;border:1px solid #505967;border-radius:9px;color:#f3f5f8;padding:9px 11px;font:inherit;min-width:125px}
+.analytics-controls select:focus-visible{outline:2px solid #8de7b3;outline-offset:2px}
+.analytics-period{display:flex;gap:4px;border:1px solid #505967;border-radius:10px;padding:3px}
+.analytics-period button{background:transparent;border:0;color:#bfc8d5;padding:8px 12px;border-radius:7px;cursor:pointer;font:inherit;font-size:13px}
+.analytics-period button[aria-pressed=true]{background:#365743;color:#b7f7ce;font-weight:700}
+.analytics-period button:focus-visible{outline:2px solid #8de7b3}
+.analytics-kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:20px}
+.analytics-kpi{background:#141720;border:1px solid #282e39;border-radius:12px;padding:14px;min-width:0}
+.analytics-kpi .kpi-label{font-size:12px;color:#aeb9ca;line-height:1.5}
+.analytics-kpi strong{display:block;font-size:27px;line-height:1.5;font-variant-numeric:tabular-nums}
+.analytics-chart{margin-top:18px;background:#141720;border:1px solid #282e39;border-radius:14px;padding:15px 12px 10px;min-width:0}
+.analytics-chart-head{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;padding:0 6px 10px}
+.analytics-chart-head label{display:flex;gap:9px;align-items:center;font-size:13px;color:#bdc7d5}
+.analytics-chart-head select{background:#1b1e26;color:#f3f5f8;border:1px solid #505967;border-radius:9px;padding:7px;font:inherit;max-width:100%}
+.analytics-chart svg{display:block;width:100%;height:auto;min-height:170px;overflow:visible}
+.analytics-legend{display:flex;gap:17px;flex-wrap:wrap;margin:5px 6px 0;color:#bdc7d5;font-size:12px}
+.analytics-legend span{display:inline-flex;gap:7px;align-items:center}
+.analytics-legend i{width:9px;height:9px;border-radius:50%;display:inline-block}
+.analytics-info{margin:14px 0 0;color:#9facbe;font-size:12px;line-height:1.65}
+.analytics-warning{color:#ffadad;font-size:13px;margin:12px 0 0;min-height:0}
+@media(max-width:700px){.analytics-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.analytics-head{display:block}.analytics-controls{margin-top:14px}}
+@media(max-width:500px){.analytics{padding:16px}.analytics-kpis{gap:7px}.analytics-kpi{padding:11px}.analytics-kpi strong{font-size:23px}.analytics-chart{padding:12px 6px}.analytics-chart-head label{flex-wrap:wrap}}
 </style>
 </head>
 <body><main>
-<div class="header"><div><h1>🧪 Лаборатория Франкенштейна</h1><p class="subtitle">Центр управления электронными долбоёбами · v0.9</p></div>
+<div class="header"><div><h1>🧪 Лаборатория Франкенштейна</h1><p class="subtitle">Центр управления электронными долбоёбами · v1.0</p></div>
 <div class="actions"><span id="lab-status" class="badge">Подключаемся...</span><button id="logout" class="logout" type="button">Выйти</button></div></div>
 <div class="notice">⚡ Переключатель «ВЫКЛ» запрещает боту отправлять новые ответы, включая продолжение разговоров. Уже отправленные сообщения не удаляются. Статистика и последние 120 событий сохраняются в /data и восстанавливаются после перезапуска Netrun. Статистика не проверяет доступность Telegram API.</div>
 <div class="bots">
-<article class="card" data-bot="serega"><div class="top"><h2>👨 Серёга</h2><label class="switch"><input type="checkbox" id="serega-power" disabled aria-label="Включить Серёгу"><span class="track"></span><span class="power-label">...</span></label></div><p class="state">Загрузка...</p><p class="muted activity">Последний запрос: —</p><div class="stats"><div class="stat"><strong data-stat="received">0</strong><span>Запросов</span></div><div class="stat"><strong data-stat="sent">0</strong><span>Ответов</span></div><div class="stat"><strong data-stat="errors">0</strong><span>Ошибок</span></div></div><p class="card-note">Художественный душнила. Анализирует изображения из канала.</p><p class="save-status" id="serega-save-status"></p></article>
-<article class="card" data-bot="furia"><div class="top"><h2>💅 Фурия</h2><label class="switch"><input type="checkbox" id="furia-power" disabled aria-label="Включить Фурию"><span class="track"></span><span class="power-label">...</span></label></div><p class="state">Загрузка...</p><p class="muted activity">Последний запрос: —</p><div class="stats"><div class="stat"><strong data-stat="received">0</strong><span>Запросов</span></div><div class="stat"><strong data-stat="sent">0</strong><span>Ответов</span></div><div class="stat"><strong data-stat="errors">0</strong><span>Ошибок</span></div></div>
+<article class="card" data-bot="serega"><div class="top"><h2>👨 Серёга</h2><label class="switch"><input type="checkbox" id="serega-power" disabled aria-label="Включить Серёгу"><span class="track"></span><span class="power-label">...</span></label></div><p class="state">Загрузка...</p><p class="muted activity">Последнее входящее: —</p><div class="stats"><div class="stat"><strong data-stat="received">0</strong><span>Входящих</span></div><div class="stat"><strong data-stat="sent">0</strong><span>Ответов</span></div><div class="stat"><strong data-stat="errors">0</strong><span>Ошибок</span></div></div><p class="card-note">Художественный душнила. Анализирует изображения из канала.</p><p class="save-status" id="serega-save-status"></p></article>
+<article class="card" data-bot="furia"><div class="top"><h2>💅 Фурия</h2><label class="switch"><input type="checkbox" id="furia-power" disabled aria-label="Включить Фурию"><span class="track"></span><span class="power-label">...</span></label></div><p class="state">Загрузка...</p><p class="muted activity">Последнее входящее: —</p><div class="stats"><div class="stat"><strong data-stat="received">0</strong><span>Входящих</span></div><div class="stat"><strong data-stat="sent">0</strong><span>Ответов</span></div><div class="stat"><strong data-stat="errors">0</strong><span>Ошибок</span></div></div>
 <div class="setting"><div class="setting-head"><label for="furia-probability">Вероятность ответа на пост</label><output id="furia-probability-value">—</output></div><input id="furia-probability" type="range" min="0" max="100" step="1" disabled></div>
 <div class="setting"><div class="setting-head"><label for="furia-delay-min">Минимальная задержка</label><output id="furia-delay-min-value">—</output></div><input id="furia-delay-min" type="range" min="0" max="300" step="5" disabled><div class="setting-head"><label for="furia-delay-max">Максимальная задержка</label><output id="furia-delay-max-value">—</output></div><input id="furia-delay-max" type="range" min="0" max="300" step="5" disabled></div><p class="save-status" id="furia-save-status"></p></article>
-<article class="card" data-bot="mark"><div class="top"><h2>🧠 Марк</h2><label class="switch"><input type="checkbox" id="mark-power" disabled aria-label="Включить Марка"><span class="track"></span><span class="power-label">...</span></label></div><p class="state">Загрузка...</p><p class="muted activity">Последний запрос: —</p><div class="stats"><div class="stat"><strong data-stat="received">0</strong><span>Запросов</span></div><div class="stat"><strong data-stat="sent">0</strong><span>Ответов</span></div><div class="stat"><strong data-stat="errors">0</strong><span>Ошибок</span></div></div>
+<article class="card" data-bot="mark"><div class="top"><h2>🧠 Марк</h2><label class="switch"><input type="checkbox" id="mark-power" disabled aria-label="Включить Марка"><span class="track"></span><span class="power-label">...</span></label></div><p class="state">Загрузка...</p><p class="muted activity">Последнее входящее: —</p><div class="stats"><div class="stat"><strong data-stat="received">0</strong><span>Входящих</span></div><div class="stat"><strong data-stat="sent">0</strong><span>Ответов</span></div><div class="stat"><strong data-stat="errors">0</strong><span>Ошибок</span></div></div>
 <div class="setting"><div class="setting-head"><label for="mark-probability">Вероятность ответа на пост</label><output id="mark-probability-value">—</output></div><input id="mark-probability" type="range" min="0" max="100" step="1" disabled></div>
 <div class="setting"><div class="setting-head"><label for="mark-delay-min">Минимальная задержка</label><output id="mark-delay-min-value">—</output></div><input id="mark-delay-min" type="range" min="0" max="300" step="5" disabled><div class="setting-head"><label for="mark-delay-max">Максимальная задержка</label><output id="mark-delay-max-value">—</output></div><input id="mark-delay-max" type="range" min="0" max="300" step="5" disabled></div><p class="save-status" id="mark-save-status"></p></article>
 </div>
+<section class="analytics" aria-labelledby="analytics-title">
+  <div class="analytics-head">
+    <div><h3 id="analytics-title">📊 Аналитический центр</h3><p class="muted">Активность ботов и обращения к ИИ по дням</p></div>
+    <div class="analytics-controls">
+      <label for="analytics-bot">Пациент<select id="analytics-bot"><option value="all">Все трое</option><option value="serega">👨 Серёга</option><option value="furia">💅 Фурия</option><option value="mark">🧠 Марк</option></select></label>
+      <div class="analytics-period" role="group" aria-label="Период аналитики"><button type="button" data-days="7" aria-pressed="true">7 дней</button><button type="button" data-days="30" aria-pressed="false">30 дней</button></div>
+    </div>
+  </div>
+  <div class="analytics-kpis" aria-live="off">
+    <div class="analytics-kpi"><span class="kpi-label">🤖 Генерации ИИ</span><strong data-kpi="ai_generations">—</strong></div>
+    <div class="analytics-kpi"><span class="kpi-label">🎧 Транскрибации</span><strong data-kpi="ai_transcriptions">—</strong></div>
+    <div class="analytics-kpi"><span class="kpi-label">💬 Отправленные ответы</span><strong data-kpi="sent">—</strong></div>
+    <div class="analytics-kpi"><span class="kpi-label">📥 Входящие Telegram</span><strong data-kpi="received">—</strong></div>
+    <div class="analytics-kpi"><span class="kpi-label">⚠️ Ошибки обработки</span><strong data-kpi="errors">—</strong></div>
+    <div class="analytics-kpi"><span class="kpi-label">⏭ Пропуски</span><strong data-kpi="skipped">—</strong></div>
+  </div>
+  <div class="analytics-chart">
+    <div class="analytics-chart-head"><strong id="analytics-chart-title">Динамика по дням</strong><label for="analytics-metric">Показатель <select id="analytics-metric"><option value="ai_generations">Генерации ИИ</option><option value="ai_transcriptions">Транскрибации</option><option value="sent">Отправленные ответы</option><option value="received">Входящие Telegram</option><option value="errors">Ошибки</option><option value="skipped">Пропуски</option></select></label></div>
+    <svg id="analytics-svg" viewBox="0 0 860 280" role="img" aria-label="График активности по дням. Данные загружаются."></svg>
+    <div id="analytics-legend" class="analytics-legend"></div>
+  </div>
+  <p id="analytics-error" class="analytics-warning" role="status"></p>
+  <p class="analytics-info">Даты и границы дней — UTC. История накапливается с установки v1.0, старые показатели v0.9 в графики не переносятся. Генерации и транскрибации — попытки вызова OpenAI, включая неудачные; это не количество пользовательских запросов и не расчёт стоимости. Счётчики ответов включают успешно отправленные сообщения.</p>
+</section>
 <section class="access" aria-labelledby="access-title"><h3 id="access-title">🔐 Доступ к личному Серёге</h3>
 <p class="muted">Добавляй участников закрытого тестирования по числовому Telegram ID. Изменения вступают в силу сразу и сохраняются после перезапуска. Пользователи из секрета Netrun сохраняют доступ независимо от этого списка.</p>
 <form id="access-form" class="access-form"><input id="access-id" type="text" inputmode="numeric" pattern="[1-9][0-9]*" maxlength="19" placeholder="Telegram ID" aria-label="Telegram ID" required autocomplete="off"><input id="access-label" type="text" maxlength="60" placeholder="Имя или пометка (необязательно)" aria-label="Имя или пометка" autocomplete="off"><button id="access-add" type="submit">Добавить</button></form>
@@ -133,7 +186,93 @@ async function removeAccess(id){
   catch(e){accessFeedback(`✕ ${e.message}`);}finally{accessBusy=false;get('access-add').disabled=false;}
 }
 function renderEvents(events){const list=get('events');list.replaceChildren();if(!events.length){const li=document.createElement('li');li.textContent='Пока событий нет. Ждём сообщения Telegram.';list.append(li);return;}for(const event of events){const li=document.createElement('li');const time=document.createElement('time');time.textContent=fmtTime(event.time);const who=document.createElement('span');who.className='who';who.textContent=names[event.bot]||event.bot;const what=document.createElement('span');what.className=`kind ${event.kind}`;what.textContent=event.text;li.append(time,who,what);list.append(li);}}
-async function refresh(){try{const r=await fetch('/lab/api/status',{cache:'no-store'});if(r.status===401){location.assign('/lab/');return;}if(!r.ok)throw Error(`HTTP ${r.status}`);const data=await r.json();csrf=data.csrf;get('lab-status').textContent=`● Лаборатория online · v${data.version}`;get('lab-status').classList.remove('bad');get('connection-error').textContent='';for(const bot of bots){const info=data.bots[bot],el=card(bot);for(const key of ['received','sent','errors'])el.querySelector(`[data-stat="${key}"]`).textContent=info.stats[key];el.querySelector('.activity').textContent=`Последний запрос: ${fmtTime(info.stats.last_received)} · ответ: ${fmtTime(info.stats.last_sent)}`;if(!busy.has(bot)){powerState[bot]=info.enabled;showPower(bot,info.enabled);get(`${bot}-power`).disabled=false;}if(!initialized&&adjustable.includes(bot)){saved[bot]={probability:info.probability,delay_min:info.delay_min,delay_max:info.delay_max};applySliders(bot,saved[bot]);enableSliders(bot,true);notice(bot,'Настройки загружены');}}renderEvents(data.events||[]);renderAccess(data.access);initialized=true;}catch(e){get('lab-status').textContent='● Нет связи с лабораторией';get('lab-status').classList.add('bad');get('connection-error').textContent='Не удалось обновить журнал и статусы. Проверь соединение.';console.error(e);}}
+
+// Analytics is a read-only view of the existing password-protected /lab/api/status.
+const analyticsState={days:7,bot:'all',metric:'ai_generations',data:null};
+const analyticsColors={serega:'#8cddb0',furia:'#d3a5ed',mark:'#f3c477'};
+const analyticsMetrics={ai_generations:'Генерации ИИ',ai_transcriptions:'Транскрибации',sent:'Отправленные ответы',received:'Входящие Telegram',errors:'Ошибки',skipped:'Пропуски'};
+const analyticsKinds=Object.keys(analyticsMetrics);
+const svgNS='http://www.w3.org/2000/svg';
+function svgNode(tag,attrs={},label=''){
+  const el=document.createElementNS(svgNS,tag);
+  for(const [key,value] of Object.entries(attrs))el.setAttribute(key,String(value));
+  if(label)el.textContent=label;
+  return el;
+}
+function analyticsSeries(day,bot,metric){
+  const data=day?.bots||{};
+  const n=Number(data[bot]?.[metric]||0);
+  return Number.isFinite(n)&&n>=0?n:0;
+}
+function analyticsDays(){
+  const all=analyticsState.data?.days||[];
+  return all.slice(-analyticsState.days);
+}
+function renderAnalytics(){
+  const data=analyticsState.data;
+  if(!data){return;}
+  const warning=get('analytics-error');
+  if(data.read_error){
+    warning.textContent='⚠️ Файл аналитики повреждён: новые данные не записываются. Требуется проверка lab_analytics.json на сервере.';
+  }else{warning.textContent='';}
+  const days=analyticsDays();
+  const selected=analyticsState.bot==='all'?bots:[analyticsState.bot];
+  for(const kind of analyticsKinds){
+    const total=days.reduce((sum,day)=>sum+selected.reduce((value,bot)=>value+analyticsSeries(day,bot,kind),0),0);
+    document.querySelector(`[data-kpi="${kind}"]`).textContent=total.toLocaleString('ru-RU');
+  }
+  drawAnalyticsChart(days,selected,analyticsState.metric);
+}
+function drawAnalyticsChart(days,selected,metric){
+  const svg=get('analytics-svg');svg.replaceChildren();
+  const legend=get('analytics-legend');legend.replaceChildren();
+  get('analytics-chart-title').textContent=`${analyticsMetrics[metric]} · ${analyticsState.days} дней`;
+  const w=860,h=280,left=46,right=18,top=18,bottom=42;
+  const pw=w-left-right,ph=h-top-bottom;
+  const values=selected.flatMap(bot=>days.map(day=>analyticsSeries(day,bot,metric)));
+  const maximum=Math.max(1,...values);
+  const niceStep=Math.max(1,Math.ceil(maximum/4));
+  const ceiling=niceStep*4;
+  const y=value=>top+ph-(value/ceiling)*ph;
+  const x=index=>left+(days.length<2?pw/2:index*pw/(days.length-1));
+  for(let i=0;i<=4;i++){
+    const value=niceStep*i,py=y(value);
+    svg.append(svgNode('line',{x1:left,y1:py,x2:w-right,y2:py,stroke:'#303743','stroke-width':1}));
+    svg.append(svgNode('text',{x:left-9,y:py+4,fill:'#99a9bb','text-anchor':'end','font-size':12},String(value)));
+  }
+  const tickInterval=days.length<=7?1:Math.max(1,Math.ceil(days.length/6));
+  for(let i=0;i<days.length;i++){
+    if(i%tickInterval!==0&&i!==days.length-1)continue;
+    const date=days[i].date;
+    const label=/^\d{4}-\d{2}-\d{2}$/.test(date)?date.slice(8)+'.'+date.slice(5,7):date;
+    svg.append(svgNode('text',{x:x(i),y:h-13,fill:'#9cabbc','text-anchor':'middle','font-size':12},label));
+  }
+  for(const bot of selected){
+    const color=analyticsColors[bot];
+    const points=days.map((day,i)=>({x:x(i),y:y(analyticsSeries(day,bot,metric)),value:analyticsSeries(day,bot,metric),date:day.date}));
+    if(points.length){
+      const polyline=svgNode('polyline',{points:points.map(p=>`${p.x},${p.y}`).join(' '),fill:'none',stroke:color,'stroke-width':3,'stroke-linecap':'round','stroke-linejoin':'round'});
+      svg.append(polyline);
+    }
+    for(const p of points){
+      const circle=svgNode('circle',{cx:p.x,cy:p.y,r:analyticsState.days===7?4:3,fill:color,stroke:'#141720','stroke-width':1.5});
+      circle.append(svgNode('title',{},`${names[bot]} · ${p.date} (UTC): ${p.value}`));
+      svg.append(circle);
+    }
+    const item=document.createElement('span');const dot=document.createElement('i');dot.style.background=color;
+    item.append(dot,document.createTextNode(names[bot]));legend.append(item);
+  }
+  svg.setAttribute('aria-label',`${analyticsMetrics[metric]}, ${analyticsState.days} дней UTC. ${selected.map(bot=>`${names[bot]}: ${days.reduce((sum,day)=>sum+analyticsSeries(day,bot,metric),0)}`).join('; ')}.`);
+}
+get('analytics-bot').addEventListener('change',event=>{analyticsState.bot=event.target.value;renderAnalytics();});
+get('analytics-metric').addEventListener('change',event=>{analyticsState.metric=event.target.value;renderAnalytics();});
+for(const button of document.querySelectorAll('[data-days]'))button.addEventListener('click',()=>{
+  analyticsState.days=Number(button.dataset.days);
+  for(const other of document.querySelectorAll('[data-days]'))other.setAttribute('aria-pressed',String(other===button));
+  renderAnalytics();
+});
+
+async function refresh(){try{const r=await fetch('/lab/api/status',{cache:'no-store'});if(r.status===401){location.assign('/lab/');return;}if(!r.ok)throw Error(`HTTP ${r.status}`);const data=await r.json();csrf=data.csrf;get('lab-status').textContent=`● Лаборатория online · v${data.version}`;get('lab-status').classList.remove('bad');get('connection-error').textContent='';for(const bot of bots){const info=data.bots[bot],el=card(bot);for(const key of ['received','sent','errors'])el.querySelector(`[data-stat="${key}"]`).textContent=info.stats[key];el.querySelector('.activity').textContent=`Последнее входящее: ${fmtTime(info.stats.last_received)} · ответ: ${fmtTime(info.stats.last_sent)}`;if(!busy.has(bot)){powerState[bot]=info.enabled;showPower(bot,info.enabled);get(`${bot}-power`).disabled=false;}if(!initialized&&adjustable.includes(bot)){saved[bot]={probability:info.probability,delay_min:info.delay_min,delay_max:info.delay_max};applySliders(bot,saved[bot]);enableSliders(bot,true);notice(bot,'Настройки загружены');}}renderEvents(data.events||[]);renderAccess(data.access);analyticsState.data=data.analytics||null;renderAnalytics();initialized=true;}catch(e){get('lab-status').textContent='● Нет связи с лабораторией';get('lab-status').classList.add('bad');get('connection-error').textContent='Не удалось обновить журнал и статусы. Проверь соединение.';console.error(e);}}
 for(const bot of bots)get(`${bot}-power`).addEventListener('change',e=>savePower(bot,e.target.checked));
 for(const bot of adjustable)for(const field of fields){const slider=get(`${bot}-${field.replaceAll('_','-')}`);slider.addEventListener('input',()=>{if(field==='delay_min'){const max=get(`${bot}-delay-max`);if(+slider.value>+max.value)max.value=slider.value;}if(field==='delay_max'){const min=get(`${bot}-delay-min`);if(+slider.value<+min.value)min.value=slider.value;}showSliders(bot);notice(bot,'Изменено — отпусти ползунок для сохранения');});slider.addEventListener('change',()=>saveSettings(bot));}
 get('access-form').addEventListener('submit',addAccess);
