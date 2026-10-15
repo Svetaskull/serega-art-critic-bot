@@ -40,6 +40,21 @@ dp = Dispatcher()
 client = OpenAI()
 
 
+def record_serega_usage(response):
+    """Store actual API usage; a metrics failure must not block the bot.
+
+    No price is guessed for gpt-5.6-luna: until its tariff is verified,
+    Lab records tokens and marks the dollar cost as unknown.
+    """
+    try:
+        lab_control.record_ai_usage(
+            'serega', 'generation', response,
+            model=getattr(response, 'model', None) or 'gpt-5.6-luna',
+        )
+    except Exception as exc:
+        print(f'⚠️ Серёга: не удалось учесть токены ({type(exc).__name__})')
+
+
 # =========================================================
 # ЗАГРУЖАЕМ МОЗГИ СЕРЁГИ
 # =========================================================
@@ -239,6 +254,7 @@ def generate_critique_sync(
         ]
     )
 
+    record_serega_usage(response)
     comment = response.output_text.strip()
 
     if not comment:
@@ -601,6 +617,7 @@ def private_critique_images_sync(history: list, images: list,
         input=history + [{"role": "user", "content": content}],
         max_output_tokens=PRIVATE_RESPONSE_TOKENS,
     )
+    record_serega_usage(response)
     parts = [(response.output_text or "").strip()]
 
     # Responses API может вернуть неполный текст при исчерпании токенов.
@@ -623,6 +640,7 @@ def private_critique_images_sync(history: list, images: list,
                 }],
                 max_output_tokens=PRIVATE_CONTINUATION_TOKENS,
             )
+            record_serega_usage(continuation)
             next_part = (continuation.output_text or "").strip()
             if next_part:
                 parts.append(next_part)

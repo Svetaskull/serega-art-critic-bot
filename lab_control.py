@@ -1,4 +1,4 @@
-"""Frankenstein Lab v1.0: password-protected controls for the shared aiohttp host.
+"""Frankenstein Lab v1.1: password-protected controls for the shared aiohttp host.
 
 Requires LAB_PASSWORD (at least 12 characters). Without it all /lab routes return 404.
 Do not run the old local lab_server.py in the cloud.
@@ -21,6 +21,7 @@ DATA_DIR = Path('/data') if Path('/data').is_dir() else BASE_DIR
 SETTINGS_FILE = DATA_DIR / 'lab_settings.json'
 ACTIVITY_FILE = DATA_DIR / 'lab_activity.json'
 ANALYTICS_FILE = DATA_DIR / 'lab_analytics.json'
+COSTS_FILE = DATA_DIR / 'lab_costs.json'
 ACCESS_FILE = DATA_DIR / 'lab_access.json'
 TESTERS_FILE = DATA_DIR / 'lab_testers.json'
 TESTER_REQUEST_LIMIT_MAX = 10000
@@ -223,6 +224,193 @@ def _analytics_snapshot():
             name: counts.get(name, _empty_daily_bot()).copy() for name in STATS
         }})
     return {'timezone': 'UTC', 'days': result, 'read_error': ANALYTICS_LOAD_ERROR}
+
+# v1.1: cost accounting lives in a separate file; v1.0 analytics remains unchanged.
+# No prompts, messages, images, user IDs or API keys are stored here.
+COSTS_RETENTION_DAYS = 90
+COST_FIELDS = ('input_tokens', 'output_tokens', 'cached_input_tokens',
+               'reasoning_output_tokens', 'audio_seconds', 'estimated_cost_microusd',
+               'priced_calls', 'unpriced_calls', 'usage_missing_calls')
+COSTS = {}  # YYYY-MM-DD -> bot -> model -> aggregate
+
+
+def _empty_cost_model():
+    return {field: 0 for field in COST_FIELDS}
+
+
+def _load_costs():
+    if not COSTS_FILE.exists():
+        return {}, False
+    try:
+        if COSTS_FILE.stat().st_size > 512 * 1024:
+            raise ValueError('Cost file too large')
+        data = json.loads(COSTS_FILE.read_text(encoding='utf-8'))
+        if (not isinstance(data, dict) or data.get('version') != 1
+                or not isinstance(data.get('days'), dict)
+                or len(data['days']) > COSTS_RETENTION_DAYS):
+            raise ValueError('Invalid costs file')
+        loaded = {}
+        for day, bots in data['days'].items():
+            if (not isinstance(day, str) or len(day) != 10
+                    or datetime.strptime(day, '%Y-%m-%d').strftime('%Y-%m-%d') != day
+                    or not isinstance(bots, dict) or set(bots) != set(STATS)):
+                raise ValueError('Invalid cost day')
+            loaded[day] = {}
+            for bot, models in bots.items():
+                if not isinstance(models, dict) or len(models) > 24:
+                    raise ValueError('Invalid cost models')
+                loaded[day][bot] = {}
+                for model, values in models.items():
+                    if (not isinstance(model, str) or not 1 <= len(model) <= 80
+                            or not isinstance(values, dict) or set(values) != set(COST_FIELDS)
+                            or any(type(v) is not int or v < 0 or v > 10**15
+                                   for v in values.values())):
+                        raise ValueError('Invalid cost values')
+                    loaded[day][bot][model] = values.copy()
+        return loaded, False
+    except (OSError, ValueError, TypeError, OverflowError):
+        print('⚠️ Лаборатория: файл расходов повреждён; запись расходов заблокирована.')
+        return {}, True
+
+
+def _save_costs(days):
+    temporary = COSTS_FILE.with_suffix('.json.tmp')
+    try:
+        with temporary.open('w', encoding='utf-8') as file:
+            json.dump({'version': 1, 'days': days}, file, ensure_ascii=False,
+                      separators=(',', ':'))
+        os.replace(temporary, COSTS_FILE)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
+COSTS, COSTS_LOAD_ERROR = _load_costs()
+
+
+def _usage_value(obj, key, default=None):
+    if obj is None:
+        return default
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
+def _safe_count(value):
+    return value if type(value) is int and 0 <= value <= 10**12 else 0
+
+
+def _safe_rate(value):
+    # Price must be explicitly supplied from a verified tariff; never guess.
+    if type(value) not in (int, float) or not 0 <= value <= 100000:
+        return None
+    return float(value)
+
+
+def record_ai_usage(bot, kind, response=None, *, model=None, audio_seconds=None,
+                    input_price_per_million=None, output_price_per_million=None,
+                    cached_input_price_per_million=None,
+                    transcription_price_per_minute=None):
+    """Record a COMPLETED API call, after its response has been received.
+
+    Existing record_ai_call() still counts attempts before an API call.
+    Pricing inputs are USD per 1M tokens or USD per audio minute, and must
+    come from verified tariffs. Missing pricing/usage is shown as unknown,
+    never as a zero-cost request. Cached audio responses must not call this.
+    """
+    if bot not in STATS or kind not in ('generation', 'transcription'):
+        return
+    if model is None:
+        model = _usage_value(response, 'model')
+    if not isinstance(model, str) or not 1 <= len(model) <= 80:
+        model = 'unknown'
+    usage = _usage_value(response, 'usage')
+    inp = _safe_count(_usage_value(usage, 'input_tokens'))
+    out = _safe_count(_usage_value(usage, 'output_tokens'))
+    inp_details = _usage_value(usage, 'input_tokens_details')
+    out_details = _usage_value(usage, 'output_tokens_details')
+    cached = min(inp, _safe_count(_usage_value(inp_details, 'cached_tokens')))
+    reasoning = min(out, _safe_count(_usage_value(out_details, 'reasoning_tokens')))
+    seconds = audio_seconds if audio_seconds is not None else _usage_value(usage, 'seconds')
+    if type(seconds) not in (int, float) or not 0 <= seconds <= 10**9:
+        seconds = 0
+    # Persist whole seconds. Fractional duration rounds up so it is not lost.
+    import math
+    seconds = math.ceil(seconds)
+    has_usage = usage is not None or seconds > 0
+    input_rate = _safe_rate(input_price_per_million)
+    output_rate = _safe_rate(output_price_per_million)
+    cached_rate = _safe_rate(cached_input_price_per_million)
+    audio_rate = _safe_rate(transcription_price_per_minute)
+    token_priced = ((inp == 0 or (input_rate is not None and
+                     (cached == 0 or cached_rate is not None)))
+                    and (out == 0 or output_rate is not None))
+    audio_priced = seconds == 0 or audio_rate is not None
+    has_billable_units = inp > 0 or out > 0 or seconds > 0
+    priced = has_usage and has_billable_units and token_priced and audio_priced
+    cost_micro = 0
+    if priced:
+        dollars = ((inp - cached) * (input_rate or 0) / 1_000_000
+                   + cached * (cached_rate or 0) / 1_000_000
+                   + out * (output_rate or 0) / 1_000_000
+                   + seconds * (audio_rate or 0) / 60)
+        cost_micro = round(dollars * 1_000_000)
+    now = datetime.now(timezone.utc).date()
+    cutoff = (now - timedelta(days=COSTS_RETENTION_DAYS - 1)).isoformat()
+    day = now.isoformat()
+    with LOCK:
+        if COSTS_LOAD_ERROR:
+            return
+        updated = {d: bots for d, bots in COSTS.items() if d >= cutoff}
+        daily = {name: models.copy() for name, models in updated.get(day, {
+            name: {} for name in STATS
+        }).items()}
+        if model not in daily[bot] and len(daily[bot]) >= 24:
+            model = 'other'
+        previous = daily[bot].get(model, _empty_cost_model())
+        values = previous.copy()
+        increments = {
+            'input_tokens': inp, 'output_tokens': out,
+            'cached_input_tokens': cached, 'reasoning_output_tokens': reasoning,
+            'audio_seconds': seconds, 'estimated_cost_microusd': cost_micro,
+            'priced_calls': int(priced),
+            'unpriced_calls': int(has_usage and not priced),
+            'usage_missing_calls': int(not has_usage),
+        }
+        if any(values[key] + inc > 10**15 for key, inc in increments.items()):
+            return
+        for key, inc in increments.items():
+            values[key] += inc
+        daily[bot][model] = values
+        updated[day] = daily
+        try:
+            _save_costs(updated)
+        except OSError as exc:
+            print(f'⚠️ Лаборатория: расходы не сохранены ({type(exc).__name__}).')
+            return
+        COSTS.clear()
+        COSTS.update(updated)
+
+
+def _costs_snapshot():
+    """Under LOCK. 30 UTC days; cost in micro-USD, never float money."""
+    today = datetime.now(timezone.utc).date()
+    result = []
+    for offset in range(29, -1, -1):
+        day = (today - timedelta(days=offset)).isoformat()
+        bots = {}
+        for bot in STATS:
+            models = COSTS.get(day, {}).get(bot, {})
+            totals = _empty_cost_model()
+            for values in models.values():
+                for field in COST_FIELDS:
+                    totals[field] += values[field]
+            bots[bot] = {'totals': totals,
+                         'models': {name: values.copy() for name, values in models.items()}}
+        result.append({'date': day, 'bots': bots})
+    return {'timezone': 'UTC', 'days': result, 'read_error': COSTS_LOAD_ERROR,
+            'currency': 'USD', 'unit': 'micro_usd', 'estimated': True}
+
 
 # Separately persisted private-chat allowlist; independent of bot settings.
 # Invalid or damaged data fails closed; do not overwrite it automatically.
@@ -626,7 +814,7 @@ async def status_handler(request):
         events = list(EVENTS)[:50]
         managed_users = sorted(MANAGED_USERS.items())
         access_load_error = ACCESS_LOAD_ERROR
-    result = {'lab': 'online', 'version': '1.0', 'csrf': session[1],
+    result = {'lab': 'online', 'version': '1.1', 'csrf': session[1],
               'started_at': STARTED_AT, 'events': events, 'bots': {},
               'access': {'managed': [{'id': str(uid), 'label': label}
                                      for uid, label in managed_users],
@@ -652,6 +840,7 @@ async def status_handler(request):
         result['bots'][bot] = data
     with LOCK:
         result['analytics'] = _analytics_snapshot()
+        result['costs'] = _costs_snapshot()
     return _security_headers(web.json_response(result))
 
 
@@ -864,6 +1053,6 @@ def register_routes(app):
     app.router.add_post('/lab/api/testers/limit', tester_limit_handler)
     app.router.add_post('/lab/api/testers/reset', tester_reset_handler)
     if LAB_ENABLED:
-        print(f'🧪 Frankenstein Lab v1.0: включена; настройки в {SETTINGS_FILE}')
+        print(f'🧪 Frankenstein Lab v1.1: включена; настройки в {SETTINGS_FILE}')
     else:
         print('🔒 Frankenstein Lab отключена: задай LAB_PASSWORD длиной от 12 символов.')
