@@ -207,6 +207,7 @@ def generate_critique_sync(
         mime_type
     )
 
+    lab_control.record_ai_call('serega', 'generation')
     response = client.responses.create(
         model="gpt-5.6-luna",
         instructions=system_prompt,
@@ -593,6 +594,7 @@ def private_critique_images_sync(history: list, images: list,
             "image_url": image_bytes_to_data_url(image_bytes, mime_type),
         })
 
+    lab_control.record_ai_call('serega', 'generation')
     response = client.responses.create(
         model="gpt-5.6-luna",
         instructions=PRIVATE_INSTRUCTIONS,
@@ -607,6 +609,7 @@ def private_critique_images_sync(history: list, images: list,
         reason = getattr(getattr(response, "incomplete_details", None), "reason", None)
         if reason == "max_output_tokens" and getattr(response, "id", None):
             print("⚠️ Серёга: лимит ответа, запрашиваем продолжение")
+            lab_control.record_ai_call('serega', 'generation')
             continuation = client.responses.create(
                 model="gpt-5.6-luna",
                 instructions=PRIVATE_INSTRUCTIONS,

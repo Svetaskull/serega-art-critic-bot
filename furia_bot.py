@@ -9,7 +9,7 @@ import subprocess
 import cv2
 import imageio_ffmpeg
 
-from lab_control import get_bot_settings, get_bot_enabled, record_event
+from lab_control import get_bot_settings, get_bot_enabled, record_event, record_ai_call
 
 from aiogram import Bot, Dispatcher
 from aiogram.filters import CommandStart
@@ -672,6 +672,8 @@ def transcribe_wav_sync(wav_path):
             "rb"
         ) as audio_file:
 
+            # Lab v1.0: count a speech request only when calling OpenAI.
+            record_ai_call('furia', 'transcription')
             transcription = (
                 client.audio.transcriptions.create(
                     model="gpt-transcribe",
@@ -1318,6 +1320,8 @@ async def generate_furia_comment(
             }
         )
 
+    # Lab v1.0: count one generation attempt before the SDK call.
+    record_ai_call('furia', 'generation')
     # OpenAI-клиент синхронный. В облачной версии Фурия живёт
     # в одном процессе с другими ботами, поэтому уводим запрос
     # в отдельный поток и не блокируем общий event loop.

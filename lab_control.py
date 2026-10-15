@@ -1,4 +1,4 @@
-"""Frankenstein Lab v0.9: password-protected controls for the shared aiohttp host.
+"""Frankenstein Lab v1.0: password-protected controls for the shared aiohttp host.
 
 Requires LAB_PASSWORD (at least 12 characters). Without it all /lab routes return 404.
 Do not run the old local lab_server.py in the cloud.
@@ -6,7 +6,7 @@ Do not run the old local lab_server.py in the cloud.
 
 import hmac
 from collections import deque
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import json
 import os
 import secrets
@@ -20,6 +20,7 @@ BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path('/data') if Path('/data').is_dir() else BASE_DIR
 SETTINGS_FILE = DATA_DIR / 'lab_settings.json'
 ACTIVITY_FILE = DATA_DIR / 'lab_activity.json'
+ANALYTICS_FILE = DATA_DIR / 'lab_analytics.json'
 ACCESS_FILE = DATA_DIR / 'lab_access.json'
 TESTERS_FILE = DATA_DIR / 'lab_testers.json'
 TESTER_REQUEST_LIMIT_MAX = 10000
@@ -112,6 +113,116 @@ def _save_activity():
 
 
 _load_activity()
+
+# v1.0: daily aggregate history is independent of the v0.9 activity file.
+# This avoids altering or resetting the old cumulative counters and event log.
+ANALYTICS_KINDS = ('received', 'sent', 'errors', 'skipped', 'ai_generations', 'ai_transcriptions')
+ANALYTICS_RETENTION_DAYS = 90
+ANALYTICS = {}  # YYYY-MM-DD -> bot -> counter -> nonnegative integer
+
+
+def _empty_daily_bot():
+    return {kind: 0 for kind in ANALYTICS_KINDS}
+
+
+def _load_analytics():
+    if not ANALYTICS_FILE.exists():
+        return {}, False
+    try:
+        if ANALYTICS_FILE.stat().st_size > 128 * 1024:
+            raise ValueError('Analytics file is too large')
+        data = json.loads(ANALYTICS_FILE.read_text(encoding='utf-8'))
+        if (not isinstance(data, dict) or data.get('version') != 1
+                or not isinstance(data.get('days'), dict)
+                or len(data['days']) > ANALYTICS_RETENTION_DAYS):
+            raise ValueError('Invalid analytics format')
+        loaded = {}
+        for day, bots in data['days'].items():
+            if not isinstance(day, str) or len(day) != 10:
+                raise ValueError('Invalid analytics day')
+            if datetime.strptime(day, '%Y-%m-%d').strftime('%Y-%m-%d') != day:
+                raise ValueError('Invalid analytics date')
+            if not isinstance(bots, dict) or set(bots) != set(STATS):
+                raise ValueError('Invalid analytics bots')
+            loaded[day] = {}
+            for bot, counts in bots.items():
+                if not isinstance(counts, dict) or set(counts) != set(ANALYTICS_KINDS):
+                    raise ValueError('Invalid analytics counters')
+                if any(type(value) is not int or value < 0 or value > 1_000_000_000
+                       for value in counts.values()):
+                    raise ValueError('Invalid analytics values')
+                loaded[day][bot] = counts.copy()
+        print(f'🧪 Лаборатория: аналитика восстановлена ({len(loaded)} дней)')
+        return loaded, False
+    except (OSError, ValueError, TypeError) as exc:
+        print(f'⚠️ Лаборатория: аналитика повреждена ({type(exc).__name__}); запись заблокирована.')
+        return {}, True
+
+
+def _save_analytics(days):
+    temporary = ANALYTICS_FILE.with_suffix('.json.tmp')
+    try:
+        with temporary.open('w', encoding='utf-8') as file:
+            json.dump({'version': 1, 'days': days}, file, ensure_ascii=False,
+                      separators=(',', ':'))
+        os.replace(temporary, ANALYTICS_FILE)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
+ANALYTICS, ANALYTICS_LOAD_ERROR = _load_analytics()
+
+
+def _record_daily(bot, kind, now):
+    """Under LOCK. Analytics failure never prevents a Telegram response."""
+    if ANALYTICS_LOAD_ERROR:
+        return
+    day = now[:10]
+    cutoff = (datetime.now(timezone.utc).date()
+              - timedelta(days=ANALYTICS_RETENTION_DAYS - 1)).isoformat()
+    updated = {date: counts for date, counts in ANALYTICS.items() if date >= cutoff}
+    daily = {name: counts.copy() for name, counts in updated.get(day, {
+        name: _empty_daily_bot() for name in STATS
+    }).items()}
+    if daily[bot][kind] >= 1_000_000_000:
+        return
+    daily[bot][kind] += 1
+    updated[day] = daily
+    try:
+        _save_analytics(updated)
+    except OSError as exc:
+        print(f'⚠️ Лаборатория: аналитика не сохранена ({type(exc).__name__}).')
+        return
+    ANALYTICS.clear()
+    ANALYTICS.update(updated)
+
+
+def record_ai_call(bot, kind):
+    """Count an attempted OpenAI call, immediately before making that call.
+
+    kind: 'generation' (text/image reasoning) or 'transcription' (speech).
+    Cached transcripts must NOT call this function.
+    """
+    if bot not in STATS or kind not in ('generation', 'transcription'):
+        return
+    counter = 'ai_generations' if kind == 'generation' else 'ai_transcriptions'
+    now = datetime.now(timezone.utc).isoformat(timespec='seconds')
+    with LOCK:
+        _record_daily(bot, counter, now)
+
+
+def _analytics_snapshot():
+    """Under LOCK. 30 calendar days, including today, UTC."""
+    today = datetime.now(timezone.utc).date()
+    result = []
+    for offset in range(29, -1, -1):
+        day = (today - timedelta(days=offset)).isoformat()
+        counts = ANALYTICS.get(day, {})
+        result.append({'date': day, 'bots': {
+            name: counts.get(name, _empty_daily_bot()).copy() for name in STATS
+        }})
+    return {'timezone': 'UTC', 'days': result, 'read_error': ANALYTICS_LOAD_ERROR}
 
 # Separately persisted private-chat allowlist; independent of bot settings.
 # Invalid or damaged data fails closed; do not overwrite it automatically.
@@ -376,6 +487,8 @@ def record_event(bot, kind):
         except OSError as exc:
             # A disk issue must never interrupt a Telegram webhook.
             print(f'⚠️ Лаборатория: статистика не сохранена ({type(exc).__name__}).')
+        if kind in ('received', 'sent', 'errors', 'skipped'):
+            _record_daily(bot, kind, now)
 
 
 def _save_settings(settings):
@@ -513,7 +626,7 @@ async def status_handler(request):
         events = list(EVENTS)[:50]
         managed_users = sorted(MANAGED_USERS.items())
         access_load_error = ACCESS_LOAD_ERROR
-    result = {'lab': 'online', 'version': '0.9', 'csrf': session[1],
+    result = {'lab': 'online', 'version': '1.0', 'csrf': session[1],
               'started_at': STARTED_AT, 'events': events, 'bots': {},
               'access': {'managed': [{'id': str(uid), 'label': label}
                                      for uid, label in managed_users],
@@ -537,6 +650,8 @@ async def status_handler(request):
                 'delay_max': settings[f'{bot}_delay_max'],
             })
         result['bots'][bot] = data
+    with LOCK:
+        result['analytics'] = _analytics_snapshot()
     return _security_headers(web.json_response(result))
 
 
@@ -749,6 +864,6 @@ def register_routes(app):
     app.router.add_post('/lab/api/testers/limit', tester_limit_handler)
     app.router.add_post('/lab/api/testers/reset', tester_reset_handler)
     if LAB_ENABLED:
-        print(f'🧪 Frankenstein Lab v0.9: включена; настройки в {SETTINGS_FILE}')
+        print(f'🧪 Frankenstein Lab v1.0: включена; настройки в {SETTINGS_FILE}')
     else:
         print('🔒 Frankenstein Lab отключена: задай LAB_PASSWORD длиной от 12 символов.')

@@ -9,7 +9,7 @@ import subprocess
 import cv2
 import imageio_ffmpeg
 
-from lab_control import get_bot_settings, get_bot_enabled, record_event
+from lab_control import get_bot_settings, get_bot_enabled, record_event, record_ai_call
 
 from aiogram import Bot, Dispatcher
 from aiogram.types import Message
@@ -659,6 +659,8 @@ def transcribe_wav_sync(wav_path):
             "rb"
         ) as audio_file:
 
+            # Lab v1.0: count an actual OpenAI speech request, not a cache hit.
+            record_ai_call('mark', 'transcription')
             transcription = (
                 client.audio.transcriptions.create(
                     model="gpt-transcribe",
@@ -1305,6 +1307,8 @@ async def generate_mark_comment(
             }
         )
 
+    # Lab v1.0: one attempted OpenAI generation per actual SDK call.
+    record_ai_call('mark', 'generation')
     # OpenAI SDK здесь синхронный. Выносим вызов в отдельный
     # поток, чтобы Марк не блокировал общий event loop сервера.
     response = await asyncio.to_thread(
