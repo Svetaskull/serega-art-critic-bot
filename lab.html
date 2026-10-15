@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Frankenstein Lab · v1.0</title>
+<title>Frankenstein Lab · v1.1</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,'Segoe UI',Arial,sans-serif;background:#101218;color:#f3f5f8}
 *{box-sizing:border-box}body{margin:0;padding:28px 20px 60px}main{max-width:1200px;margin:auto}
@@ -51,10 +51,38 @@
 .analytics-warning{color:#ffadad;font-size:13px;margin:12px 0 0;min-height:0}
 @media(max-width:700px){.analytics-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.analytics-head{display:block}.analytics-controls{margin-top:14px}}
 @media(max-width:500px){.analytics{padding:16px}.analytics-kpis{gap:7px}.analytics-kpi{padding:11px}.analytics-kpi strong{font-size:23px}.analytics-chart{padding:12px 6px}.analytics-chart-head label{flex-wrap:wrap}}
+
+/* Lab v1.1: cost accounting is read-only; amounts are known-rate estimates only. */
+.finance{margin-top:22px;background:#1b1e26;border:1px solid #313641;border-radius:18px;padding:21px;min-width:0}
+.finance-head{display:flex;align-items:flex-start;justify-content:space-between;gap:15px;flex-wrap:wrap}
+.finance-head p{margin:7px 0 0}
+.finance-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:20px}
+.finance-kpi{background:#141720;border:1px solid #282e39;border-radius:12px;padding:14px;min-width:0}
+.finance-kpi .kpi-label{display:block;font-size:12px;color:#aeb9ca;line-height:1.5}
+.finance-kpi strong{display:block;font-size:23px;line-height:1.55;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+.finance-kpi small{display:block;color:#a0afc2;font-size:11px;line-height:1.5}
+.finance-kpi.cost strong{color:#8de7b3}
+.finance-status{font-size:12px;line-height:1.6;color:#edc990;margin:14px 0 0}
+.finance-chart{margin-top:18px;background:#141720;border:1px solid #282e39;border-radius:14px;padding:15px 12px 10px;min-width:0}
+.finance-chart-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:0 6px 10px}
+.finance-chart-head label{display:flex;align-items:center;gap:9px;color:#bdc7d5;font-size:13px}
+.finance-chart-head select{background:#1b1e26;color:#f3f5f8;border:1px solid #505967;border-radius:9px;padding:7px;font:inherit}
+.finance-chart svg{display:block;width:100%;height:auto;min-height:170px;overflow:visible}
+.finance-chart-message{color:#b9c5d5;font-size:12px;line-height:1.6;padding:0 6px;min-height:18px}
+.finance-models{margin-top:20px;overflow-x:auto}
+.finance-models table{border-collapse:collapse;width:100%;font-size:13px;min-width:620px}
+.finance-models caption{text-align:left;font-weight:700;font-size:15px;margin-bottom:10px}
+.finance-models th,.finance-models td{text-align:left;border-bottom:1px solid #303640;padding:10px 9px;white-space:nowrap}
+.finance-models th{font-size:12px;color:#aeb9ca;font-weight:600}
+.finance-models td.numeric,.finance-models th.numeric{text-align:right;font-variant-numeric:tabular-nums}
+.finance-info{margin:14px 0 0;color:#9facbe;font-size:12px;line-height:1.65}
+.finance-warning{color:#ffadad;font-size:13px;margin:10px 0 0}
+@media(max-width:850px){.finance-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:500px){.finance{padding:16px}.finance-kpis{gap:7px}.finance-kpi{padding:11px}.finance-kpi strong{font-size:21px}.finance-chart{padding:12px 6px}.finance-chart-head label{flex-wrap:wrap}}
 </style>
 </head>
 <body><main>
-<div class="header"><div><h1>🧪 Лаборатория Франкенштейна</h1><p class="subtitle">Центр управления электронными долбоёбами · v1.0</p></div>
+<div class="header"><div><h1>🧪 Лаборатория Франкенштейна</h1><p class="subtitle">Центр управления электронными долбоёбами · v1.1</p></div>
 <div class="actions"><span id="lab-status" class="badge">Подключаемся...</span><button id="logout" class="logout" type="button">Выйти</button></div></div>
 <div class="notice">⚡ Переключатель «ВЫКЛ» запрещает боту отправлять новые ответы, включая продолжение разговоров. Уже отправленные сообщения не удаляются. Статистика и последние 120 событий сохраняются в /data и восстанавливаются после перезапуска Netrun. Статистика не проверяет доступность Telegram API.</div>
 <div class="bots">
@@ -68,7 +96,7 @@
 </div>
 <section class="analytics" aria-labelledby="analytics-title">
   <div class="analytics-head">
-    <div><h3 id="analytics-title">📊 Аналитический центр</h3><p class="muted">Активность ботов и обращения к ИИ по дням</p></div>
+    <div><h3 id="analytics-title">📊 Аналитический центр</h3><p class="muted">Активность ботов и обращения к ИИ по дням · фильтры действуют и на расходы</p></div>
     <div class="analytics-controls">
       <label for="analytics-bot">Пациент<select id="analytics-bot"><option value="all">Все трое</option><option value="serega">👨 Серёга</option><option value="furia">💅 Фурия</option><option value="mark">🧠 Марк</option></select></label>
       <div class="analytics-period" role="group" aria-label="Период аналитики"><button type="button" data-days="7" aria-pressed="true">7 дней</button><button type="button" data-days="30" aria-pressed="false">30 дней</button></div>
@@ -89,6 +117,29 @@
   </div>
   <p id="analytics-error" class="analytics-warning" role="status"></p>
   <p class="analytics-info">Даты и границы дней — UTC. История накапливается с установки v1.0, старые показатели v0.9 в графики не переносятся. Генерации и транскрибации — попытки вызова OpenAI, включая неудачные; это не количество пользовательских запросов и не расчёт стоимости. Счётчики ответов включают успешно отправленные сообщения.</p>
+</section>
+<section class="finance" aria-labelledby="finance-title">
+  <div class="finance-head"><div><h3 id="finance-title">💸 Финансовый монитор</h3><p class="muted">Токены и оценка расходов OpenAI · выбранные выше бот и период</p></div><span class="small" id="finance-period">7 дней · все трое</span></div>
+  <div class="finance-kpis">
+    <div class="finance-kpi cost"><span class="kpi-label">💵 Известная оценка расходов</span><strong id="finance-cost">—</strong><small id="finance-cost-caption">Данные загружаются</small></div>
+    <div class="finance-kpi"><span class="kpi-label">📥 Входные токены</span><strong id="finance-input">—</strong><small>Включая кэшированные</small></div>
+    <div class="finance-kpi"><span class="kpi-label">📤 Выходные токены</span><strong id="finance-output">—</strong><small>Включая reasoning-токены</small></div>
+    <div class="finance-kpi"><span class="kpi-label">♻️ Токены из кэша</span><strong id="finance-cached">—</strong><small>Уже входят во входные</small></div>
+    <div class="finance-kpi"><span class="kpi-label">🧠 Reasoning-токены</span><strong id="finance-reasoning">—</strong><small>Уже входят в выходные</small></div>
+    <div class="finance-kpi"><span class="kpi-label">🎧 Аудио на распознавание</span><strong id="finance-audio">—</strong><small>Длительность в минутах</small></div>
+    <div class="finance-kpi"><span class="kpi-label">✓ Завершённые API-вызовы</span><strong id="finance-calls">—</strong><small>С успешным ответом API</small></div>
+    <div class="finance-kpi"><span class="kpi-label">❔ Вызовы без расчёта цены</span><strong id="finance-unpriced">—</strong><small>Включая отсутствующие usage</small></div>
+  </div>
+  <p id="finance-status" class="finance-status" role="status">Ожидаем данные учёта...</p>
+  <div class="finance-chart">
+    <div class="finance-chart-head"><strong id="finance-chart-title">Динамика по дням</strong><label for="finance-metric">Показатель <select id="finance-metric"><option value="input_tokens">Входные токены</option><option value="output_tokens">Выходные токены</option><option value="estimated_cost_microusd">Известная стоимость, $</option><option value="audio_seconds">Аудио, минуты</option></select></label></div>
+    <svg id="finance-svg" viewBox="0 0 860 280" role="img" aria-label="График токенов и стоимости. Данные загружаются."></svg>
+    <div id="finance-legend" class="analytics-legend"></div>
+    <p id="finance-chart-message" class="finance-chart-message"></p>
+  </div>
+  <div class="finance-models"><table><caption>По моделям за выбранный период</caption><thead><tr><th>Бот</th><th>Модель</th><th class="numeric">Вызовов</th><th class="numeric">Вход</th><th class="numeric">Выход</th><th class="numeric">Оценка, $</th></tr></thead><tbody id="finance-model-rows"><tr><td colspan="6" class="small">Загружаем данные...</td></tr></tbody></table></div>
+  <p id="finance-error" class="finance-warning" role="status"></p>
+  <p class="finance-info">Расчёт ведётся с установки v1.1, за календарные дни UTC. Цены берутся только из явно заданных тарифов, если они есть. <strong>«—» означает, что стоимость неизвестна, а не равна нулю.</strong> При частично известных тарифах сумма показывает только рассчитанную часть и не является итоговым счётом OpenAI. Учитываются успешные API-вызовы; попытки и ошибки отдельно отражены в аналитике выше. Данные о сообщениях и промптах в финансовой статистике не хранятся.</p>
 </section>
 <section class="access" aria-labelledby="access-title"><h3 id="access-title">🔐 Доступ к личному Серёге</h3>
 <p class="muted">Добавляй участников закрытого тестирования по числовому Telegram ID. Изменения вступают в силу сразу и сохраняются после перезапуска. Пользователи из секрета Netrun сохраняют доступ независимо от этого списка.</p>
@@ -264,15 +315,126 @@ function drawAnalyticsChart(days,selected,metric){
   }
   svg.setAttribute('aria-label',`${analyticsMetrics[metric]}, ${analyticsState.days} дней UTC. ${selected.map(bot=>`${names[bot]}: ${days.reduce((sum,day)=>sum+analyticsSeries(day,bot,metric),0)}`).join('; ')}.`);
 }
-get('analytics-bot').addEventListener('change',event=>{analyticsState.bot=event.target.value;renderAnalytics();});
+
+// Financial view uses the existing authenticated status endpoint; no additional API calls.
+const financeState={data:null,metric:'input_tokens'};
+const financeFields=['input_tokens','output_tokens','cached_input_tokens','reasoning_output_tokens','audio_seconds','estimated_cost_microusd','priced_calls','unpriced_calls','usage_missing_calls'];
+const financeLabels={input_tokens:'Входные токены',output_tokens:'Выходные токены',estimated_cost_microusd:'Известная стоимость, $',audio_seconds:'Аудио, минуты'};
+function finCount(value){const n=Number(value);return Number.isSafeInteger(n)&&n>=0?n:0;}
+function finNumber(value){return value.toLocaleString('ru-RU');}
+function finMoney(micro){return '$'+(micro/1000000).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:6});}
+function finDuration(seconds){return (seconds/60).toLocaleString('ru-RU',{maximumFractionDigits:1})+' мин';}
+function financeDay(day,bot){return day?.bots?.[bot]?.totals||{};}
+function financeMetricValue(totals,metric){
+  const n=finCount(totals[metric]);
+  return metric==='estimated_cost_microusd'?n/1000000:metric==='audio_seconds'?n/60:n;
+}
+function financeMetricLabel(value,metric){
+  return metric==='estimated_cost_microusd'?finMoney(Math.round(value*1000000)):
+    metric==='audio_seconds'?finDuration(value*60):finNumber(Math.round(value));
+}
+function renderFinance(){
+  const data=financeState.data;
+  if(!data)return;
+  const days=(Array.isArray(data.days)?data.days:[]).slice(-analyticsState.days);
+  const selected=analyticsState.bot==='all'?bots:[analyticsState.bot];
+  get('finance-period').textContent=`${analyticsState.days} дней · ${analyticsState.bot==='all'?'все трое':names[analyticsState.bot]}`;
+  const total=Object.fromEntries(financeFields.map(key=>[key,0]));
+  const models=new Map();
+  for(const day of days)for(const bot of selected){
+    const entry=day?.bots?.[bot];
+    if(!entry)continue;
+    for(const key of financeFields)total[key]+=finCount(entry.totals?.[key]);
+    for(const [model,counts] of Object.entries(entry.models||{})){
+      const key=JSON.stringify([bot,model]);
+      if(!models.has(key))models.set(key,{bot,model,totals:Object.fromEntries(financeFields.map(field=>[field,0]))});
+      const bucket=models.get(key).totals;
+      for(const field of financeFields)bucket[field]+=finCount(counts[field]);
+    }
+  }
+  const known=total.priced_calls,unknown=total.unpriced_calls+total.usage_missing_calls;
+  const allCalls=known+unknown;
+  get('finance-cost').textContent=known?finMoney(total.estimated_cost_microusd):'—';
+  get('finance-cost-caption').textContent=known?(unknown?'Частичная оценка':'Оценка по заданным тарифам'):'Нет подтверждённой цены';
+  get('finance-input').textContent=finNumber(total.input_tokens);
+  get('finance-output').textContent=finNumber(total.output_tokens);
+  get('finance-cached').textContent=finNumber(total.cached_input_tokens);
+  get('finance-reasoning').textContent=finNumber(total.reasoning_output_tokens);
+  get('finance-audio').textContent=finDuration(total.audio_seconds);
+  get('finance-calls').textContent=finNumber(allCalls);
+  get('finance-unpriced').textContent=finNumber(unknown);
+  get('finance-status').textContent=!allCalls?'Пока нет завершённых API-вызовов за выбранный период.':
+    !known?'⚠️ Тарифы не заданы или данных для расчёта недостаточно. Токены и длительность учитываются, но стоимость неизвестна.':
+    unknown?`⚠️ ${finNumber(unknown)} из ${finNumber(allCalls)} вызовов без расчёта цены. Показана только известная часть расходов.`:
+    '✓ Все учтённые вызовы имеют рассчитанную оценку стоимости. Это не фактический счёт провайдера.';
+  get('finance-error').textContent=data.read_error?'⚠️ Файл lab_costs.json повреждён. Новые расходы не записываются до исправления файла на сервере.':'';
+  const tbody=get('finance-model-rows');tbody.replaceChildren();
+  const rows=[...models.values()].sort((a,b)=>a.bot.localeCompare(b.bot)||a.model.localeCompare(b.model));
+  if(!rows.length){const tr=document.createElement('tr'),td=document.createElement('td');td.colSpan=6;td.className='small';td.textContent='Пока нет данных по моделям.';tr.append(td);tbody.append(tr);}
+  for(const row of rows){
+    const tr=document.createElement('tr');
+    const t=row.totals, calls=t.priced_calls+t.unpriced_calls+t.usage_missing_calls;
+    const values=[names[row.bot]||row.bot,row.model,finNumber(calls),finNumber(t.input_tokens),finNumber(t.output_tokens),t.priced_calls?finMoney(t.estimated_cost_microusd)+(t.unpriced_calls+t.usage_missing_calls?' *':''):'—'];
+    values.forEach((value,index)=>{const td=document.createElement('td');td.textContent=value;if(index>=2)td.className='numeric';tr.append(td);});
+    tbody.append(tr);
+  }
+  drawFinanceChart(days,selected,financeState.metric);
+}
+function drawFinanceChart(days,selected,metric){
+  const svg=get('finance-svg');svg.replaceChildren();
+  const legend=get('finance-legend');legend.replaceChildren();
+  get('finance-chart-title').textContent=`${financeLabels[metric]} · ${analyticsState.days} дней`;
+  const message=get('finance-chart-message');
+  const pricedDays=days.some(day=>selected.some(bot=>finCount(financeDay(day,bot).priced_calls)>0));
+  if(metric==='estimated_cost_microusd'&&!pricedDays){
+    message.textContent='Стоимость пока не рассчитана: нет вызовов с подтверждёнными тарифами. Выбери «Входные токены», чтобы увидеть активность.';
+    svg.setAttribute('aria-label','Стоимость не рассчитана: нет подтверждённых тарифов.');return;
+  }
+  message.textContent=metric==='estimated_cost_microusd'?'На графике только рассчитанная часть расходов. Неоценённые вызовы не включены.':'';
+  const w=860,h=280,left=64,right=18,top=18,bottom=42,pw=w-left-right,ph=h-top-bottom;
+  const vals=selected.flatMap(bot=>days.map(day=>financeMetricValue(financeDay(day,bot),metric)));
+  const maximum=Math.max(0,...vals);
+  const step=maximum===0?1:Math.pow(10,Math.floor(Math.log10(maximum/4)))*Math.max(1,Math.ceil(maximum/4/Math.pow(10,Math.floor(Math.log10(maximum/4)))));
+  const ceiling=step*4;
+  const y=value=>top+ph-(value/ceiling)*ph;
+  const x=index=>left+(days.length<2?pw/2:index*pw/(days.length-1));
+  for(let i=0;i<=4;i++){
+    const value=step*i,py=y(value);
+    svg.append(svgNode('line',{x1:left,y1:py,x2:w-right,y2:py,stroke:'#303743','stroke-width':1}));
+    const label=metric==='estimated_cost_microusd'?'$'+value.toLocaleString('en-US',{maximumFractionDigits:5}):
+      value.toLocaleString('ru-RU',{maximumFractionDigits:1});
+    svg.append(svgNode('text',{x:left-9,y:py+4,fill:'#99a9bb','text-anchor':'end','font-size':12},label));
+  }
+  const interval=days.length<=7?1:Math.max(1,Math.ceil(days.length/6));
+  for(let i=0;i<days.length;i++){
+    if(i%interval!==0&&i!==days.length-1)continue;
+    const date=days[i].date;
+    const label=/^\d{4}-\d{2}-\d{2}$/.test(date)?date.slice(8)+'.'+date.slice(5,7):date;
+    svg.append(svgNode('text',{x:x(i),y:h-13,fill:'#9cabbc','text-anchor':'middle','font-size':12},label));
+  }
+  for(const bot of selected){
+    const color=analyticsColors[bot];
+    const points=days.map((day,i)=>({x:x(i),y:y(financeMetricValue(financeDay(day,bot),metric)),value:financeMetricValue(financeDay(day,bot),metric),date:day.date}));
+    if(points.length)svg.append(svgNode('polyline',{points:points.map(p=>`${p.x},${p.y}`).join(' '),fill:'none',stroke:color,'stroke-width':3,'stroke-linecap':'round','stroke-linejoin':'round'}));
+    for(const p of points){
+      const circle=svgNode('circle',{cx:p.x,cy:p.y,r:analyticsState.days===7?4:3,fill:color,stroke:'#141720','stroke-width':1.5});
+      circle.append(svgNode('title',{},`${names[bot]} · ${p.date} UTC: ${financeMetricLabel(p.value,metric)}`));svg.append(circle);
+    }
+    const item=document.createElement('span'),dot=document.createElement('i');dot.style.background=color;item.append(dot,document.createTextNode(names[bot]));legend.append(item);
+  }
+  svg.setAttribute('aria-label',`${financeLabels[metric]}, ${analyticsState.days} дней UTC. ${selected.map(bot=>`${names[bot]}: ${financeMetricLabel(days.reduce((sum,day)=>sum+financeMetricValue(financeDay(day,bot),metric),0),metric)}`).join('; ')}`);
+}
+get('finance-metric').addEventListener('change',event=>{financeState.metric=event.target.value;renderFinance();});
+
+get('analytics-bot').addEventListener('change',event=>{analyticsState.bot=event.target.value;renderAnalytics();renderFinance();});
 get('analytics-metric').addEventListener('change',event=>{analyticsState.metric=event.target.value;renderAnalytics();});
 for(const button of document.querySelectorAll('[data-days]'))button.addEventListener('click',()=>{
   analyticsState.days=Number(button.dataset.days);
   for(const other of document.querySelectorAll('[data-days]'))other.setAttribute('aria-pressed',String(other===button));
-  renderAnalytics();
+  renderAnalytics();renderFinance();
 });
 
-async function refresh(){try{const r=await fetch('/lab/api/status',{cache:'no-store'});if(r.status===401){location.assign('/lab/');return;}if(!r.ok)throw Error(`HTTP ${r.status}`);const data=await r.json();csrf=data.csrf;get('lab-status').textContent=`● Лаборатория online · v${data.version}`;get('lab-status').classList.remove('bad');get('connection-error').textContent='';for(const bot of bots){const info=data.bots[bot],el=card(bot);for(const key of ['received','sent','errors'])el.querySelector(`[data-stat="${key}"]`).textContent=info.stats[key];el.querySelector('.activity').textContent=`Последнее входящее: ${fmtTime(info.stats.last_received)} · ответ: ${fmtTime(info.stats.last_sent)}`;if(!busy.has(bot)){powerState[bot]=info.enabled;showPower(bot,info.enabled);get(`${bot}-power`).disabled=false;}if(!initialized&&adjustable.includes(bot)){saved[bot]={probability:info.probability,delay_min:info.delay_min,delay_max:info.delay_max};applySliders(bot,saved[bot]);enableSliders(bot,true);notice(bot,'Настройки загружены');}}renderEvents(data.events||[]);renderAccess(data.access);analyticsState.data=data.analytics||null;renderAnalytics();initialized=true;}catch(e){get('lab-status').textContent='● Нет связи с лабораторией';get('lab-status').classList.add('bad');get('connection-error').textContent='Не удалось обновить журнал и статусы. Проверь соединение.';console.error(e);}}
+async function refresh(){try{const r=await fetch('/lab/api/status',{cache:'no-store'});if(r.status===401){location.assign('/lab/');return;}if(!r.ok)throw Error(`HTTP ${r.status}`);const data=await r.json();csrf=data.csrf;get('lab-status').textContent=`● Лаборатория online · v${data.version}`;get('lab-status').classList.remove('bad');get('connection-error').textContent='';for(const bot of bots){const info=data.bots[bot],el=card(bot);for(const key of ['received','sent','errors'])el.querySelector(`[data-stat="${key}"]`).textContent=info.stats[key];el.querySelector('.activity').textContent=`Последнее входящее: ${fmtTime(info.stats.last_received)} · ответ: ${fmtTime(info.stats.last_sent)}`;if(!busy.has(bot)){powerState[bot]=info.enabled;showPower(bot,info.enabled);get(`${bot}-power`).disabled=false;}if(!initialized&&adjustable.includes(bot)){saved[bot]={probability:info.probability,delay_min:info.delay_min,delay_max:info.delay_max};applySliders(bot,saved[bot]);enableSliders(bot,true);notice(bot,'Настройки загружены');}}renderEvents(data.events||[]);renderAccess(data.access);analyticsState.data=data.analytics||null;financeState.data=data.costs||null;renderAnalytics();renderFinance();initialized=true;}catch(e){get('lab-status').textContent='● Нет связи с лабораторией';get('lab-status').classList.add('bad');get('connection-error').textContent='Не удалось обновить журнал и статусы. Проверь соединение.';console.error(e);}}
 for(const bot of bots)get(`${bot}-power`).addEventListener('change',e=>savePower(bot,e.target.checked));
 for(const bot of adjustable)for(const field of fields){const slider=get(`${bot}-${field.replaceAll('_','-')}`);slider.addEventListener('input',()=>{if(field==='delay_min'){const max=get(`${bot}-delay-max`);if(+slider.value>+max.value)max.value=slider.value;}if(field==='delay_max'){const min=get(`${bot}-delay-min`);if(+slider.value<+min.value)min.value=slider.value;}showSliders(bot);notice(bot,'Изменено — отпусти ползунок для сохранения');});slider.addEventListener('change',()=>saveSettings(bot));}
 get('access-form').addEventListener('submit',addAccess);

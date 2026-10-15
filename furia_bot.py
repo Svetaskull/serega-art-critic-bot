@@ -5,11 +5,13 @@ import json
 import os
 import tempfile
 import subprocess
+import wave
 
 import cv2
 import imageio_ffmpeg
 
-from lab_control import get_bot_settings, get_bot_enabled, record_event, record_ai_call
+from lab_control import (get_bot_settings, get_bot_enabled, record_event,
+                         record_ai_call, record_ai_usage)
 
 from aiogram import Bot, Dispatcher
 from aiogram.filters import CommandStart
@@ -32,6 +34,35 @@ bot = Bot(token=telegram_token)
 dp = Dispatcher()
 
 client = OpenAI()
+
+
+def record_furia_usage(response, kind, *, wav_path=None):
+    """Save OpenAI response usage without interrupting Telegram replies.
+
+    Pricing is deliberately omitted until the model's tariff is verified.
+    For transcription, local WAV duration is metadata, not an API charge.
+    No audio, messages or prompts are written to the cost file.
+    """
+    try:
+        audio_seconds = None
+        if kind == 'transcription' and wav_path:
+            try:
+                with wave.open(wav_path, 'rb') as wav:
+                    rate = wav.getframerate()
+                    if rate > 0:
+                        audio_seconds = wav.getnframes() / rate
+            except (OSError, EOFError, ValueError, wave.Error):
+                # If WAV metadata cannot be read, token usage may still exist.
+                pass
+
+        record_ai_usage(
+            'furia', kind, response,
+            model=getattr(response, 'model', None)
+                  or ('gpt-transcribe' if kind == 'transcription' else 'gpt-5.6-luna'),
+            audio_seconds=audio_seconds,
+        )
+    except Exception as exc:
+        print(f'⚠️ Фурия: не удалось учесть токены ({type(exc).__name__})')
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -688,6 +719,9 @@ def transcribe_wav_sync(wav_path):
                 )
             )
 
+        # Record only completed calls; cached transcripts never reach here.
+        record_furia_usage(transcription, 'transcription', wav_path=wav_path)
+
         transcript = (
             transcription.text or ""
         ).strip()
@@ -1337,6 +1371,7 @@ async def generate_furia_comment(
         ]
     )
 
+    record_furia_usage(response, 'generation')
     return response.output_text
 
 

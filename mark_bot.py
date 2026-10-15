@@ -5,11 +5,13 @@ import json
 import os
 import tempfile
 import subprocess
+import wave
 
 import cv2
 import imageio_ffmpeg
 
-from lab_control import get_bot_settings, get_bot_enabled, record_event, record_ai_call
+from lab_control import (get_bot_settings, get_bot_enabled, record_event,
+                         record_ai_call, record_ai_usage)
 
 from aiogram import Bot, Dispatcher
 from aiogram.types import Message
@@ -31,6 +33,33 @@ bot = Bot(token=telegram_token)
 dp = Dispatcher()
 
 client = OpenAI()
+
+def record_mark_usage(response, kind, *, wav_path=None):
+    """Record OpenAI usage without affecting Telegram replies.
+
+    Prices are deliberately unknown until verified. Audio duration is read
+    from the local WAV file. No prompts or transcribed text are stored.
+    """
+    try:
+        audio_seconds = None
+        if kind == 'transcription' and wav_path:
+            try:
+                with wave.open(wav_path, 'rb') as wav:
+                    rate = wav.getframerate()
+                    if rate > 0:
+                        audio_seconds = wav.getnframes() / rate
+            except (OSError, EOFError, ValueError, wave.Error):
+                pass
+
+        record_ai_usage(
+            'mark', kind, response,
+            model=getattr(response, 'model', None)
+                  or ('gpt-transcribe' if kind == 'transcription' else 'gpt-5.6-luna'),
+            audio_seconds=audio_seconds,
+        )
+    except Exception as exc:
+        print(f'⚠️ Марк: не удалось учесть токены ({type(exc).__name__})')
+
 
 PROMPT_FILE = os.path.join(BASE_DIR, "mark_prompt.txt")
 
@@ -674,6 +703,9 @@ def transcribe_wav_sync(wav_path):
                     )
                 )
             )
+
+        # Only completed API calls are recorded; cache hits do not reach here.
+        record_mark_usage(transcription, 'transcription', wav_path=wav_path)
 
         transcript = (
             transcription.text or ""
@@ -1322,6 +1354,8 @@ async def generate_mark_comment(
             }
         ]
     )
+
+    record_mark_usage(response, 'generation')
 
     return response.output_text
 
