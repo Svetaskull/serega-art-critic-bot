@@ -1,4 +1,4 @@
-"""Frankenstein Lab v1.1: password-protected controls for the shared aiohttp host.
+"""Frankenstein Lab v1.2: password-protected controls for the shared aiohttp host.
 
 Requires LAB_PASSWORD (at least 12 characters). Without it all /lab routes return 404.
 Do not run the old local lab_server.py in the cloud.
@@ -7,6 +7,7 @@ Do not run the old local lab_server.py in the cloud.
 import hmac
 from collections import deque
 from datetime import datetime, timezone, timedelta
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import json
 import os
 import secrets
@@ -225,13 +226,29 @@ def _analytics_snapshot():
         }})
     return {'timezone': 'UTC', 'days': result, 'read_error': ANALYTICS_LOAD_ERROR}
 
-# v1.1: cost accounting lives in a separate file; v1.0 analytics remains unchanged.
-# No prompts, messages, images, user IDs or API keys are stored here.
+# v1.2: financial accounting is isolated from bot settings and access lists.
+# Never store prompts, images, chat IDs, transcripts, or API credentials.
+# Previous v1.1 /data/lab_costs.json records are preserved on migration.
 COSTS_RETENTION_DAYS = 90
-COST_FIELDS = ('input_tokens', 'output_tokens', 'cached_input_tokens',
-               'reasoning_output_tokens', 'audio_seconds', 'estimated_cost_microusd',
-               'priced_calls', 'unpriced_calls', 'usage_missing_calls')
+LEGACY_COST_FIELDS = ('input_tokens', 'output_tokens', 'cached_input_tokens',
+                      'reasoning_output_tokens', 'audio_seconds',
+                      'estimated_cost_microusd', 'priced_calls',
+                      'unpriced_calls', 'usage_missing_calls')
+COST_FIELDS = LEGACY_COST_FIELDS + (
+    'cache_write_tokens', 'cache_write_12h_tokens', 'uncached_input_tokens',
+    'unclassified_input_tokens', 'estimated_cache_write_tokens',
+)
 COSTS = {}  # YYYY-MM-DD -> bot -> model -> aggregate
+
+# Price configuration is intentionally opt-in. All prices are USD.
+# Netrun environment variable examples (illustrative, NOT official tariffs):
+# LAB_LUNA_CACHE_WRITE_USD_PER_M=0.25
+# LAB_LUNA_CACHE_READ_USD_PER_M=0.025
+# LAB_LUNA_INPUT_USD_PER_M=0.25
+# LAB_LUNA_OUTPUT_USD_PER_M=1.19
+# LAB_TRANSCRIBE_USD_PER_MIN=...  (only if verified)
+# LAB_LUNA_ASSUME_UNCACHED_WRITES=1  (estimate, not an exact measurement)
+# Without the opt-in assumption, unreported cache writes remain unclassified.
 
 
 def _empty_cost_model():
@@ -245,10 +262,11 @@ def _load_costs():
         if COSTS_FILE.stat().st_size > 512 * 1024:
             raise ValueError('Cost file too large')
         data = json.loads(COSTS_FILE.read_text(encoding='utf-8'))
-        if (not isinstance(data, dict) or data.get('version') != 1
-                or not isinstance(data.get('days'), dict)
+        version = data.get('version') if isinstance(data, dict) else None
+        if (version not in (1, 2) or not isinstance(data.get('days'), dict)
                 or len(data['days']) > COSTS_RETENTION_DAYS):
             raise ValueError('Invalid costs file')
+        required_fields = set(LEGACY_COST_FIELDS if version == 1 else COST_FIELDS)
         loaded = {}
         for day, bots in data['days'].items():
             if (not isinstance(day, str) or len(day) != 10
@@ -262,11 +280,15 @@ def _load_costs():
                 loaded[day][bot] = {}
                 for model, values in models.items():
                     if (not isinstance(model, str) or not 1 <= len(model) <= 80
-                            or not isinstance(values, dict) or set(values) != set(COST_FIELDS)
+                            or not isinstance(values, dict)
+                            or set(values) != required_fields
                             or any(type(v) is not int or v < 0 or v > 10**15
                                    for v in values.values())):
                         raise ValueError('Invalid cost values')
-                    loaded[day][bot][model] = values.copy()
+                    # Never reinterpret historical v1.1 tokens as cache writes.
+                    loaded[day][bot][model] = _empty_cost_model() | values
+        if version == 1:
+            print('🧪 Лаборатория: расходы v1.1 загружены без потери истории')
         return loaded, False
     except (OSError, ValueError, TypeError, OverflowError):
         print('⚠️ Лаборатория: файл расходов повреждён; запись расходов заблокирована.')
@@ -277,7 +299,7 @@ def _save_costs(days):
     temporary = COSTS_FILE.with_suffix('.json.tmp')
     try:
         with temporary.open('w', encoding='utf-8') as file:
-            json.dump({'version': 1, 'days': days}, file, ensure_ascii=False,
+            json.dump({'version': 2, 'days': days}, file, ensure_ascii=False,
                       separators=(',', ':'))
         os.replace(temporary, COSTS_FILE)
     finally:
@@ -301,22 +323,54 @@ def _safe_count(value):
 
 
 def _safe_rate(value):
-    # Price must be explicitly supplied from a verified tariff; never guess.
-    if type(value) not in (int, float) or not 0 <= value <= 100000:
+    # Reject NaN, infinity, booleans, negative numbers and malformed strings.
+    if value is None or type(value) is bool:
         return None
-    return float(value)
+    try:
+        result = Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+    return result if result.is_finite() and 0 <= result <= 100000 else None
+
+
+def _env_rate(name):
+    raw = os.getenv(name)
+    return _safe_rate(raw) if raw is not None and raw.strip() else None
+
+
+def _luna_model(model):
+    normalized = model.lower().replace('.', '_').replace('-', '_')
+    return normalized.startswith('gpt_5_6_luna')
+
+
+def _reported_cache_write_tokens(usage, details, available):
+    """Read write tokens only when an API response explicitly reports them."""
+    for obj, key in (
+        (details, 'cache_write_tokens'),
+        (details, 'cache_creation_tokens'),
+        (usage, 'cache_creation_input_tokens'),
+        (usage, 'cache_write_input_tokens'),
+    ):
+        value = _usage_value(obj, key)
+        if type(value) is int and 0 <= value <= available:
+            return value
+    return None
 
 
 def record_ai_usage(bot, kind, response=None, *, model=None, audio_seconds=None,
                     input_price_per_million=None, output_price_per_million=None,
                     cached_input_price_per_million=None,
-                    transcription_price_per_minute=None):
-    """Record a COMPLETED API call, after its response has been received.
+                    transcription_price_per_minute=None,
+                    cache_write_price_per_million=None,
+                    cache_write_12h_price_per_million=None):
+    """Record a successful OpenAI call without interrupting Telegram handling.
 
-    Existing record_ai_call() still counts attempts before an API call.
-    Pricing inputs are USD per 1M tokens or USD per audio minute, and must
-    come from verified tariffs. Missing pricing/usage is shown as unknown,
-    never as a zero-cost request. Cached audio responses must not call this.
+    The three bots already call this after each API response. Prices are read
+    from opt-in environment variables (or explicit keyword overrides), never
+    guessed. Token counts for cache reads and writes are kept separately.
+    When a write count is unavailable, it stays unclassified unless the owner
+    explicitly enables LAB_LUNA_ASSUME_UNCACHED_WRITES=1. That estimate may
+    overcount writes by including truly uncached input.
     """
     if bot not in STATS or kind not in ('generation', 'transcription'):
         return
@@ -327,34 +381,95 @@ def record_ai_usage(bot, kind, response=None, *, model=None, audio_seconds=None,
     usage = _usage_value(response, 'usage')
     inp = _safe_count(_usage_value(usage, 'input_tokens'))
     out = _safe_count(_usage_value(usage, 'output_tokens'))
-    inp_details = _usage_value(usage, 'input_tokens_details')
+    details = _usage_value(usage, 'input_tokens_details')
     out_details = _usage_value(usage, 'output_tokens_details')
-    cached = min(inp, _safe_count(_usage_value(inp_details, 'cached_tokens')))
+    cached = min(inp, _safe_count(_usage_value(details, 'cached_tokens')))
     reasoning = min(out, _safe_count(_usage_value(out_details, 'reasoning_tokens')))
     seconds = audio_seconds if audio_seconds is not None else _usage_value(usage, 'seconds')
     if type(seconds) not in (int, float) or not 0 <= seconds <= 10**9:
         seconds = 0
-    # Persist whole seconds. Fractional duration rounds up so it is not lost.
     import math
     seconds = math.ceil(seconds)
     has_usage = usage is not None or seconds > 0
+    is_luna = _luna_model(model)
+    is_transcription = kind == 'transcription'
+
+    noncached = inp - cached
+    writes = 0
+    writes_12h = 0
+    estimated_writes = 0
+    unclassified = 0
+    uncached = 0
+    if not is_transcription and noncached:
+        reported = _reported_cache_write_tokens(usage, details, noncached)
+        reported_12h = _usage_value(details, 'cache_write_12h_tokens')
+        if reported_12h is None:
+            reported_12h = _usage_value(usage, 'cache_write_12h_tokens')
+        if type(reported_12h) is not int or not 0 <= reported_12h <= noncached:
+            reported_12h = 0
+        if reported is not None:
+            writes_12h = min(reported_12h, reported)
+            writes = reported - writes_12h
+            uncached = noncached - reported
+        elif is_luna and os.getenv('LAB_LUNA_ASSUME_UNCACHED_WRITES', '').strip() == '1':
+            writes_12h = reported_12h
+            writes = noncached - writes_12h
+            estimated_writes = writes
+        else:
+            # Unknown split between write and uncached: don't price it blindly.
+            unclassified = noncached
+
     input_rate = _safe_rate(input_price_per_million)
     output_rate = _safe_rate(output_price_per_million)
     cached_rate = _safe_rate(cached_input_price_per_million)
+    write_rate = _safe_rate(cache_write_price_per_million)
+    write_12h_rate = _safe_rate(cache_write_12h_price_per_million)
     audio_rate = _safe_rate(transcription_price_per_minute)
-    token_priced = ((inp == 0 or (input_rate is not None and
-                     (cached == 0 or cached_rate is not None)))
-                    and (out == 0 or output_rate is not None))
-    audio_priced = seconds == 0 or audio_rate is not None
-    has_billable_units = inp > 0 or out > 0 or seconds > 0
-    priced = has_usage and has_billable_units and token_priced and audio_priced
+    if is_luna:
+        if input_rate is None:
+            input_rate = _env_rate('LAB_LUNA_INPUT_USD_PER_M')
+        if output_rate is None:
+            output_rate = _env_rate('LAB_LUNA_OUTPUT_USD_PER_M')
+        if cached_rate is None:
+            cached_rate = _env_rate('LAB_LUNA_CACHE_READ_USD_PER_M')
+        if write_rate is None:
+            write_rate = _env_rate('LAB_LUNA_CACHE_WRITE_USD_PER_M')
+        if write_12h_rate is None:
+            write_12h_rate = _env_rate('LAB_LUNA_CACHE_WRITE_12H_USD_PER_M')
+    if is_transcription and audio_rate is None and model.lower().startswith('gpt-transcribe'):
+        audio_rate = _env_rate('LAB_TRANSCRIBE_USD_PER_MIN')
+
     cost_micro = 0
+    if is_transcription:
+        # A transcription is billed by EITHER time OR token usage, not both.
+        # Prefer the verified minute tariff if duration is available.
+        if seconds > 0 and audio_rate is not None:
+            priced = True
+            dollars = Decimal(seconds) * audio_rate / Decimal(60)
+        elif seconds == 0 and (inp or out) and input_rate is not None and output_rate is not None:
+            priced = True
+            dollars = (Decimal(inp) * input_rate + Decimal(out) * output_rate) / Decimal(1_000_000)
+        else:
+            priced = False
+            dollars = Decimal(0)
+    else:
+        priced = (has_usage and (inp > 0 or out > 0)
+                  and unclassified == 0
+                  and (uncached == 0 or input_rate is not None)
+                  and (cached == 0 or cached_rate is not None)
+                  and (writes == 0 or write_rate is not None)
+                  and (writes_12h == 0 or write_12h_rate is not None)
+                  and (out == 0 or output_rate is not None))
+        dollars = Decimal(0)
+        if priced:
+            dollars = (Decimal(uncached) * (input_rate or 0)
+                       + Decimal(cached) * (cached_rate or 0)
+                       + Decimal(writes) * (write_rate or 0)
+                       + Decimal(writes_12h) * (write_12h_rate or 0)
+                       + Decimal(out) * (output_rate or 0)) / Decimal(1_000_000)
     if priced:
-        dollars = ((inp - cached) * (input_rate or 0) / 1_000_000
-                   + cached * (cached_rate or 0) / 1_000_000
-                   + out * (output_rate or 0) / 1_000_000
-                   + seconds * (audio_rate or 0) / 60)
-        cost_micro = round(dollars * 1_000_000)
+        cost_micro = int((dollars * Decimal(1_000_000)).quantize(
+            Decimal('1'), rounding=ROUND_HALF_UP))
     now = datetime.now(timezone.utc).date()
     cutoff = (now - timedelta(days=COSTS_RETENTION_DAYS - 1)).isoformat()
     day = now.isoformat()
@@ -376,6 +491,11 @@ def record_ai_usage(bot, kind, response=None, *, model=None, audio_seconds=None,
             'priced_calls': int(priced),
             'unpriced_calls': int(has_usage and not priced),
             'usage_missing_calls': int(not has_usage),
+            'cache_write_tokens': writes,
+            'cache_write_12h_tokens': writes_12h,
+            'uncached_input_tokens': uncached,
+            'unclassified_input_tokens': unclassified,
+            'estimated_cache_write_tokens': estimated_writes,
         }
         if any(values[key] + inc > 10**15 for key, inc in increments.items()):
             return
@@ -393,7 +513,7 @@ def record_ai_usage(bot, kind, response=None, *, model=None, audio_seconds=None,
 
 
 def _costs_snapshot():
-    """Under LOCK. 30 UTC days; cost in micro-USD, never float money."""
+    """Under LOCK. 30 UTC days; prices in micro-USD, never float money."""
     today = datetime.now(timezone.utc).date()
     result = []
     for offset in range(29, -1, -1):
@@ -409,7 +529,11 @@ def _costs_snapshot():
                          'models': {name: values.copy() for name, values in models.items()}}
         result.append({'date': day, 'bots': bots})
     return {'timezone': 'UTC', 'days': result, 'read_error': COSTS_LOAD_ERROR,
-            'currency': 'USD', 'unit': 'micro_usd', 'estimated': True}
+            'currency': 'USD', 'unit': 'micro_usd', 'estimated': True,
+            'pricing_version': 2,
+            'pricing_mode': 'configured_rates_only',
+            'cache_write_inference_enabled':
+                os.getenv('LAB_LUNA_ASSUME_UNCACHED_WRITES', '').strip() == '1'}
 
 
 # Separately persisted private-chat allowlist; independent of bot settings.
@@ -814,7 +938,7 @@ async def status_handler(request):
         events = list(EVENTS)[:50]
         managed_users = sorted(MANAGED_USERS.items())
         access_load_error = ACCESS_LOAD_ERROR
-    result = {'lab': 'online', 'version': '1.1', 'csrf': session[1],
+    result = {'lab': 'online', 'version': '1.2', 'csrf': session[1],
               'started_at': STARTED_AT, 'events': events, 'bots': {},
               'access': {'managed': [{'id': str(uid), 'label': label}
                                      for uid, label in managed_users],
@@ -1053,6 +1177,6 @@ def register_routes(app):
     app.router.add_post('/lab/api/testers/limit', tester_limit_handler)
     app.router.add_post('/lab/api/testers/reset', tester_reset_handler)
     if LAB_ENABLED:
-        print(f'🧪 Frankenstein Lab v1.1: включена; настройки в {SETTINGS_FILE}')
+        print(f'🧪 Frankenstein Lab v1.2: включена; настройки в {SETTINGS_FILE}')
     else:
         print('🔒 Frankenstein Lab отключена: задай LAB_PASSWORD длиной от 12 символов.')
