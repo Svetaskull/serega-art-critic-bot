@@ -33,7 +33,10 @@ if not telegram_token:
 bot = Bot(token=telegram_token)
 dp = Dispatcher()
 
-client = OpenAI()
+# Отдельный ключ проекта Фурии. Пока он не задан, используем общий ключ,
+# чтобы обновление кода не прерывало работу бота.
+furia_openai_api_key = os.getenv("FURIA_OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
+client = OpenAI(api_key=furia_openai_api_key)
 
 
 def record_furia_usage(response, kind, *, wav_path=None):

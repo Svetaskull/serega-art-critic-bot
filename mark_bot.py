@@ -32,7 +32,10 @@ if not telegram_token:
 bot = Bot(token=telegram_token)
 dp = Dispatcher()
 
-client = OpenAI()
+# Dedicated Mark project key when configured; otherwise use the shared key.
+# Keeping the fallback makes deployment safe before new secrets are added.
+mark_openai_key = os.getenv("MARK_OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
+client = OpenAI(api_key=mark_openai_key)
 
 def record_mark_usage(response, kind, *, wav_path=None):
     """Record OpenAI usage without affecting Telegram replies.
