@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Frankenstein Lab · v1.1</title>
+<title>Frankenstein Lab · v1.2</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,'Segoe UI',Arial,sans-serif;background:#101218;color:#f3f5f8}
 *{box-sizing:border-box}body{margin:0;padding:28px 20px 60px}main{max-width:1200px;margin:auto}
@@ -52,7 +52,7 @@
 @media(max-width:700px){.analytics-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.analytics-head{display:block}.analytics-controls{margin-top:14px}}
 @media(max-width:500px){.analytics{padding:16px}.analytics-kpis{gap:7px}.analytics-kpi{padding:11px}.analytics-kpi strong{font-size:23px}.analytics-chart{padding:12px 6px}.analytics-chart-head label{flex-wrap:wrap}}
 
-/* Lab v1.1: cost accounting is read-only; amounts are known-rate estimates only. */
+/* Lab v1.2: cost accounting separates cache reads, writes and unclassified input. */
 .finance{margin-top:22px;background:#1b1e26;border:1px solid #313641;border-radius:18px;padding:21px;min-width:0}
 .finance-head{display:flex;align-items:flex-start;justify-content:space-between;gap:15px;flex-wrap:wrap}
 .finance-head p{margin:7px 0 0}
@@ -70,7 +70,7 @@
 .finance-chart svg{display:block;width:100%;height:auto;min-height:170px;overflow:visible}
 .finance-chart-message{color:#b9c5d5;font-size:12px;line-height:1.6;padding:0 6px;min-height:18px}
 .finance-models{margin-top:20px;overflow-x:auto}
-.finance-models table{border-collapse:collapse;width:100%;font-size:13px;min-width:620px}
+.finance-models table{border-collapse:collapse;width:100%;font-size:13px;min-width:1050px}
 .finance-models caption{text-align:left;font-weight:700;font-size:15px;margin-bottom:10px}
 .finance-models th,.finance-models td{text-align:left;border-bottom:1px solid #303640;padding:10px 9px;white-space:nowrap}
 .finance-models th{font-size:12px;color:#aeb9ca;font-weight:600}
@@ -82,7 +82,7 @@
 </style>
 </head>
 <body><main>
-<div class="header"><div><h1>🧪 Лаборатория Франкенштейна</h1><p class="subtitle">Центр управления электронными долбоёбами · v1.1</p></div>
+<div class="header"><div><h1>🧪 Лаборатория Франкенштейна</h1><p class="subtitle">Центр управления электронными долбоёбами · v1.2</p></div>
 <div class="actions"><span id="lab-status" class="badge">Подключаемся...</span><button id="logout" class="logout" type="button">Выйти</button></div></div>
 <div class="notice">⚡ Переключатель «ВЫКЛ» запрещает боту отправлять новые ответы, включая продолжение разговоров. Уже отправленные сообщения не удаляются. Статистика и последние 120 событий сохраняются в /data и восстанавливаются после перезапуска Netrun. Статистика не проверяет доступность Telegram API.</div>
 <div class="bots">
@@ -121,25 +121,30 @@
 <section class="finance" aria-labelledby="finance-title">
   <div class="finance-head"><div><h3 id="finance-title">💸 Финансовый монитор</h3><p class="muted">Токены и оценка расходов OpenAI · выбранные выше бот и период</p></div><span class="small" id="finance-period">7 дней · все трое</span></div>
   <div class="finance-kpis">
-    <div class="finance-kpi cost"><span class="kpi-label">💵 Известная оценка расходов</span><strong id="finance-cost">—</strong><small id="finance-cost-caption">Данные загружаются</small></div>
+    <div class="finance-kpi cost"><span class="kpi-label">💵 Рассчитанные расходы</span><strong id="finance-cost">—</strong><small id="finance-cost-caption">Данные загружаются</small></div>
     <div class="finance-kpi"><span class="kpi-label">📥 Входные токены</span><strong id="finance-input">—</strong><small>Включая кэшированные</small></div>
     <div class="finance-kpi"><span class="kpi-label">📤 Выходные токены</span><strong id="finance-output">—</strong><small>Включая reasoning-токены</small></div>
-    <div class="finance-kpi"><span class="kpi-label">♻️ Токены из кэша</span><strong id="finance-cached">—</strong><small>Уже входят во входные</small></div>
+    <div class="finance-kpi"><span class="kpi-label">♻️ Прочитано из кэша</span><strong id="finance-cached">—</strong><small>Cache reads · входят во входные</small></div>
+    <div class="finance-kpi"><span class="kpi-label">📝 Записано в кэш</span><strong id="finance-writes">—</strong><small>Обычные записи · входят во входные</small></div>
+    <div class="finance-kpi"><span class="kpi-label">⏳ Запись в кэш 12 ч</span><strong id="finance-writes-12h">—</strong><small>Отдельная категория тарифа</small></div>
+    <div class="finance-kpi"><span class="kpi-label">📄 Без кэша</span><strong id="finance-uncached">—</strong><small>Только распознанные обычные входные</small></div>
+    <div class="finance-kpi"><span class="kpi-label">❓ Не классифицировано</span><strong id="finance-unclassified">—</strong><small>Запись в кэш или обычный вход — неизвестно</small></div>
     <div class="finance-kpi"><span class="kpi-label">🧠 Reasoning-токены</span><strong id="finance-reasoning">—</strong><small>Уже входят в выходные</small></div>
     <div class="finance-kpi"><span class="kpi-label">🎧 Аудио на распознавание</span><strong id="finance-audio">—</strong><small>Длительность в минутах</small></div>
     <div class="finance-kpi"><span class="kpi-label">✓ Завершённые API-вызовы</span><strong id="finance-calls">—</strong><small>С успешным ответом API</small></div>
     <div class="finance-kpi"><span class="kpi-label">❔ Вызовы без расчёта цены</span><strong id="finance-unpriced">—</strong><small>Включая отсутствующие usage</small></div>
+    <div class="finance-kpi"><span class="kpi-label">🧮 Предположенная запись</span><strong id="finance-estimated-writes">—</strong><small>Часть записей выше, вычисленная по допущению</small></div>
   </div>
   <p id="finance-status" class="finance-status" role="status">Ожидаем данные учёта...</p>
   <div class="finance-chart">
-    <div class="finance-chart-head"><strong id="finance-chart-title">Динамика по дням</strong><label for="finance-metric">Показатель <select id="finance-metric"><option value="input_tokens">Входные токены</option><option value="output_tokens">Выходные токены</option><option value="estimated_cost_microusd">Известная стоимость, $</option><option value="audio_seconds">Аудио, минуты</option></select></label></div>
+    <div class="finance-chart-head"><strong id="finance-chart-title">Динамика по дням</strong><label for="finance-metric">Показатель <select id="finance-metric"><option value="input_tokens">Входные токены</option><option value="output_tokens">Выходные токены</option><option value="cached_input_tokens">Чтение кэша</option><option value="cache_write_tokens">Запись кэша</option><option value="cache_write_12h_tokens">Запись кэша 12 ч</option><option value="unclassified_input_tokens">Не классифицировано</option><option value="estimated_cost_microusd">Рассчитанная стоимость, $</option><option value="audio_seconds">Аудио, минуты</option></select></label></div>
     <svg id="finance-svg" viewBox="0 0 860 280" role="img" aria-label="График токенов и стоимости. Данные загружаются."></svg>
     <div id="finance-legend" class="analytics-legend"></div>
     <p id="finance-chart-message" class="finance-chart-message"></p>
   </div>
-  <div class="finance-models"><table><caption>По моделям за выбранный период</caption><thead><tr><th>Бот</th><th>Модель</th><th class="numeric">Вызовов</th><th class="numeric">Вход</th><th class="numeric">Выход</th><th class="numeric">Оценка, $</th></tr></thead><tbody id="finance-model-rows"><tr><td colspan="6" class="small">Загружаем данные...</td></tr></tbody></table></div>
+  <div class="finance-models"><table><caption>По моделям за выбранный период</caption><thead><tr><th>Бот</th><th>Модель</th><th class="numeric">Вызовов</th><th class="numeric">Вход</th><th class="numeric">Чтение кэша</th><th class="numeric">Запись кэша</th><th class="numeric">Запись 12 ч</th><th class="numeric">Неизвестный вход</th><th class="numeric">Выход</th><th class="numeric">Оценка, $</th></tr></thead><tbody id="finance-model-rows"><tr><td colspan="10" class="small">Загружаем данные...</td></tr></tbody></table></div>
   <p id="finance-error" class="finance-warning" role="status"></p>
-  <p class="finance-info">Расчёт ведётся с установки v1.1, за календарные дни UTC. Цены берутся только из явно заданных тарифов, если они есть. <strong>«—» означает, что стоимость неизвестна, а не равна нулю.</strong> При частично известных тарифах сумма показывает только рассчитанную часть и не является итоговым счётом OpenAI. Учитываются успешные API-вызовы; попытки и ошибки отдельно отражены в аналитике выше. Данные о сообщениях и промптах в финансовой статистике не хранятся.</p>
+  <p class="finance-info">Учёт начался в v1.1; дни считаются по UTC. <strong>«—» означает неизвестную стоимость, а не нулевую.</strong> Сумма — расчёт по настроенным тарифам, не официальный счёт OpenAI; тарифы могут быть приблизительными. В v1.2 запись в кэш выделяется только по данным API либо при включённом допущении, что весь вход без cache reads был записан в кэш. Такое допущение может завышать стоимость. Если разделить запись и обычный вход нельзя, токены остаются «не классифицировано», а вызов — без расчёта. История v1.1 сохранена, но задним числом на категории кэша не разбивается. Учитываются успешные вызовы; тексты сообщений и промптов не сохраняются.</p>
 </section>
 <section class="access" aria-labelledby="access-title"><h3 id="access-title">🔐 Доступ к личному Серёге</h3>
 <p class="muted">Добавляй участников закрытого тестирования по числовому Telegram ID. Изменения вступают в силу сразу и сохраняются после перезапуска. Пользователи из секрета Netrun сохраняют доступ независимо от этого списка.</p>
@@ -318,8 +323,8 @@ function drawAnalyticsChart(days,selected,metric){
 
 // Financial view uses the existing authenticated status endpoint; no additional API calls.
 const financeState={data:null,metric:'input_tokens'};
-const financeFields=['input_tokens','output_tokens','cached_input_tokens','reasoning_output_tokens','audio_seconds','estimated_cost_microusd','priced_calls','unpriced_calls','usage_missing_calls'];
-const financeLabels={input_tokens:'Входные токены',output_tokens:'Выходные токены',estimated_cost_microusd:'Известная стоимость, $',audio_seconds:'Аудио, минуты'};
+const financeFields=['input_tokens','output_tokens','cached_input_tokens','reasoning_output_tokens','audio_seconds','estimated_cost_microusd','priced_calls','unpriced_calls','usage_missing_calls','cache_write_tokens','cache_write_12h_tokens','uncached_input_tokens','unclassified_input_tokens','estimated_cache_write_tokens'];
+const financeLabels={input_tokens:'Входные токены',output_tokens:'Выходные токены',cached_input_tokens:'Чтение кэша',cache_write_tokens:'Запись кэша',cache_write_12h_tokens:'Запись кэша 12 ч',unclassified_input_tokens:'Не классифицировано',estimated_cost_microusd:'Рассчитанная стоимость, $',audio_seconds:'Аудио, минуты'};
 function finCount(value){const n=Number(value);return Number.isSafeInteger(n)&&n>=0?n:0;}
 function finNumber(value){return value.toLocaleString('ru-RU');}
 function finMoney(micro){return '$'+(micro/1000000).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:6});}
@@ -354,27 +359,38 @@ function renderFinance(){
   }
   const known=total.priced_calls,unknown=total.unpriced_calls+total.usage_missing_calls;
   const allCalls=known+unknown;
+  const writes=total.cache_write_tokens, writes12=total.cache_write_12h_tokens;
   get('finance-cost').textContent=known?finMoney(total.estimated_cost_microusd):'—';
-  get('finance-cost-caption').textContent=known?(unknown?'Частичная оценка':'Оценка по заданным тарифам'):'Нет подтверждённой цены';
+  get('finance-cost-caption').textContent=known?(unknown?'Частичная оценка':'Расчёт по настроенным тарифам'):'Нет рассчитанной стоимости';
   get('finance-input').textContent=finNumber(total.input_tokens);
   get('finance-output').textContent=finNumber(total.output_tokens);
   get('finance-cached').textContent=finNumber(total.cached_input_tokens);
+  get('finance-writes').textContent=finNumber(writes);
+  get('finance-writes-12h').textContent=finNumber(writes12);
+  get('finance-uncached').textContent=finNumber(total.uncached_input_tokens);
+  get('finance-unclassified').textContent=finNumber(total.unclassified_input_tokens);
+  get('finance-estimated-writes').textContent=finNumber(total.estimated_cache_write_tokens);
   get('finance-reasoning').textContent=finNumber(total.reasoning_output_tokens);
   get('finance-audio').textContent=finDuration(total.audio_seconds);
   get('finance-calls').textContent=finNumber(allCalls);
   get('finance-unpriced').textContent=finNumber(unknown);
-  get('finance-status').textContent=!allCalls?'Пока нет завершённых API-вызовов за выбранный период.':
-    !known?'⚠️ Тарифы не заданы или данных для расчёта недостаточно. Токены и длительность учитываются, но стоимость неизвестна.':
-    unknown?`⚠️ ${finNumber(unknown)} из ${finNumber(allCalls)} вызовов без расчёта цены. Показана только известная часть расходов.`:
-    '✓ Все учтённые вызовы имеют рассчитанную оценку стоимости. Это не фактический счёт провайдера.';
+  const messages=[];
+  if(!allCalls){messages.push('Пока нет завершённых API-вызовов за выбранный период.');}
+  else if(!known){messages.push('⚠️ Стоимость не рассчитана: нет заданных тарифов или недостаточно данных об использовании и кэше.');}
+  else if(unknown){messages.push(`⚠️ ${finNumber(unknown)} из ${finNumber(allCalls)} вызовов без расчёта. Показана только рассчитанная часть расходов.`);}
+  else{messages.push('✓ Все учтённые вызовы оценены по настроенным тарифам; это не фактический счёт OpenAI.');}
+  if(total.unclassified_input_tokens>0){messages.push(`❓ ${finNumber(total.unclassified_input_tokens)} входных токенов нельзя разделить на запись в кэш и обычный вход.`);}
+  if(total.estimated_cache_write_tokens>0){messages.push(`🧮 ${finNumber(total.estimated_cache_write_tokens)} токенов записи в кэш определены по допущению, а не измерены API.`);}
+  if(data.cache_write_inference_enabled){messages.push('⚠️ Допущение о записи некэшированного входа включено на сервере.');}
+  get('finance-status').textContent=messages.join(' ');
   get('finance-error').textContent=data.read_error?'⚠️ Файл lab_costs.json повреждён. Новые расходы не записываются до исправления файла на сервере.':'';
   const tbody=get('finance-model-rows');tbody.replaceChildren();
   const rows=[...models.values()].sort((a,b)=>a.bot.localeCompare(b.bot)||a.model.localeCompare(b.model));
-  if(!rows.length){const tr=document.createElement('tr'),td=document.createElement('td');td.colSpan=6;td.className='small';td.textContent='Пока нет данных по моделям.';tr.append(td);tbody.append(tr);}
+  if(!rows.length){const tr=document.createElement('tr'),td=document.createElement('td');td.colSpan=10;td.className='small';td.textContent='Пока нет данных по моделям.';tr.append(td);tbody.append(tr);}
   for(const row of rows){
     const tr=document.createElement('tr');
     const t=row.totals, calls=t.priced_calls+t.unpriced_calls+t.usage_missing_calls;
-    const values=[names[row.bot]||row.bot,row.model,finNumber(calls),finNumber(t.input_tokens),finNumber(t.output_tokens),t.priced_calls?finMoney(t.estimated_cost_microusd)+(t.unpriced_calls+t.usage_missing_calls?' *':''):'—'];
+    const values=[names[row.bot]||row.bot,row.model,finNumber(calls),finNumber(t.input_tokens),finNumber(t.cached_input_tokens),finNumber(t.cache_write_tokens),finNumber(t.cache_write_12h_tokens),finNumber(t.unclassified_input_tokens),finNumber(t.output_tokens),t.priced_calls?finMoney(t.estimated_cost_microusd)+(t.unpriced_calls+t.usage_missing_calls?' *':''):'—'];
     values.forEach((value,index)=>{const td=document.createElement('td');td.textContent=value;if(index>=2)td.className='numeric';tr.append(td);});
     tbody.append(tr);
   }
@@ -387,10 +403,10 @@ function drawFinanceChart(days,selected,metric){
   const message=get('finance-chart-message');
   const pricedDays=days.some(day=>selected.some(bot=>finCount(financeDay(day,bot).priced_calls)>0));
   if(metric==='estimated_cost_microusd'&&!pricedDays){
-    message.textContent='Стоимость пока не рассчитана: нет вызовов с подтверждёнными тарифами. Выбери «Входные токены», чтобы увидеть активность.';
-    svg.setAttribute('aria-label','Стоимость не рассчитана: нет подтверждённых тарифов.');return;
+    message.textContent='Стоимость пока не рассчитана: нет вызовов с полным набором тарифов и данных. Выбери «Входные токены», чтобы увидеть активность.';
+    svg.setAttribute('aria-label','Стоимость не рассчитана: нет полных данных или тарифов.');return;
   }
-  message.textContent=metric==='estimated_cost_microusd'?'На графике только рассчитанная часть расходов. Неоценённые вызовы не включены.':'';
+  message.textContent=metric==='estimated_cost_microusd'?'На графике только рассчитанная часть расходов. Неоценённые вызовы не включены; тарифы могут быть приблизительными.':'';
   const w=860,h=280,left=64,right=18,top=18,bottom=42,pw=w-left-right,ph=h-top-bottom;
   const vals=selected.flatMap(bot=>days.map(day=>financeMetricValue(financeDay(day,bot),metric)));
   const maximum=Math.max(0,...vals);
