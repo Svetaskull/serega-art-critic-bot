@@ -11,11 +11,12 @@ import cv2
 import imageio_ffmpeg
 
 from lab_control import (get_bot_settings, get_bot_enabled, record_event,
-                         record_ai_call, record_ai_usage)
+                         record_ai_call, record_ai_usage, record_diagnostic)
 
 from aiogram import Bot, Dispatcher
+from aiogram.exceptions import TelegramAPIError
 from aiogram.types import Message
-from openai import OpenAI
+from openai import OpenAI, OpenAIError
 
 
 # =========================================================
@@ -36,6 +37,25 @@ dp = Dispatcher()
 # Keeping the fallback makes deployment safe before new secrets are added.
 mark_openai_key = os.getenv("MARK_OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
 client = OpenAI(api_key=mark_openai_key)
+
+
+def record_mark_failure(error, operation='handle_update', source=None):
+    """Log safe exception metadata; never store user text, media or secrets.
+
+    Existing event counters are independent and remain at their call sites.
+    A logging failure must never interrupt Mark's response.
+    """
+    if source is None:
+        if isinstance(error, OpenAIError):
+            source = 'openai'
+        elif isinstance(error, TelegramAPIError):
+            source = 'telegram'
+        else:
+            source = 'system'
+    try:
+        record_diagnostic('mark', source, operation, error)
+    except Exception as log_error:
+        print(f'⚠️ Марк: журнал диагностики недоступен ({type(log_error).__name__})')
 
 def record_mark_usage(response, kind, *, wav_path=None):
     """Record OpenAI usage without affecting Telegram replies.
@@ -61,6 +81,7 @@ def record_mark_usage(response, kind, *, wav_path=None):
             audio_seconds=audio_seconds,
         )
     except Exception as exc:
+        record_mark_failure(exc, 'other', 'system')
         print(f'⚠️ Марк: не удалось учесть токены ({type(exc).__name__})')
 
 
@@ -111,6 +132,7 @@ def load_memory():
         return memory
 
     except Exception as e:
+        record_mark_failure(e, 'startup', 'system')
 
         print("⚠️ Не удалось загрузить память:")
         print(type(e).__name__)
@@ -146,6 +168,7 @@ def save_memory():
         os.replace(temp_file, MEMORY_FILE)
 
     except Exception as e:
+        record_mark_failure(e, 'other', 'system')
 
         print("⚠️ Не удалось сохранить память:")
         print(type(e).__name__)
@@ -216,6 +239,7 @@ async def get_image_data(photo_file_id):
         )
 
     except Exception as e:
+        record_mark_failure(e, 'handle_update')
 
         print("⚠️ Не удалось загрузить фотографию:")
         print(type(e).__name__)
@@ -634,6 +658,8 @@ def extract_audio_to_wav(
 
             return "no_audio"
 
+        # An absent audio track is normal; other ffmpeg failures are diagnostic.
+        record_mark_failure(RuntimeError('FFmpeg processing failed'), 'other', 'system')
         print(
             "⚠️ FFmpeg не смог достать звук."
         )
@@ -649,6 +675,7 @@ def extract_audio_to_wav(
         return "error"
 
     except Exception as e:
+        record_mark_failure(e, 'other', 'system')
 
         print(
             "⚠️ Ошибка при извлечении аудио:"
@@ -738,6 +765,7 @@ def transcribe_wav_sync(wav_path):
         )
 
     except Exception as e:
+        record_mark_failure(e, 'transcription')
 
         print(
             "⚠️ Не удалось распознать "
@@ -1132,6 +1160,7 @@ async def process_video(video):
         )
 
     except Exception as e:
+        record_mark_failure(e, 'handle_update')
 
         print(
             "⚠️ Не удалось обработать видео:"
@@ -1510,6 +1539,7 @@ async def channel_post_handler(
 
     except Exception as e:
         record_event('mark', 'errors')
+        record_mark_failure(e, 'generation')
 
         print("❌ Ошибка OpenAI:")
         print(type(e).__name__)
@@ -1551,6 +1581,7 @@ async def channel_post_handler(
 
     except Exception as e:
         record_event('mark', 'errors')
+        record_mark_failure(e, 'send_message')
 
         print(
             "❌ Не удалось "
@@ -1783,6 +1814,7 @@ async def reply_to_mark_handler(
 
     except Exception as e:
         record_event('mark', 'errors')
+        record_mark_failure(e, 'generation')
 
         print("❌ Ошибка OpenAI:")
         print(type(e).__name__)
@@ -1816,6 +1848,7 @@ async def reply_to_mark_handler(
 
     except Exception as e:
         record_event('mark', 'errors')
+        record_mark_failure(e, 'send_message')
 
         print(
             "❌ Не удалось "

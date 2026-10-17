@@ -11,12 +11,13 @@ import cv2
 import imageio_ffmpeg
 
 from lab_control import (get_bot_settings, get_bot_enabled, record_event,
-                         record_ai_call, record_ai_usage)
+                         record_ai_call, record_ai_usage, record_diagnostic)
 
 from aiogram import Bot, Dispatcher
+from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import CommandStart
 from aiogram.types import Message
-from openai import OpenAI
+from openai import OpenAI, OpenAIError
 
 
 # =========================================================
@@ -37,6 +38,25 @@ dp = Dispatcher()
 # чтобы обновление кода не прерывало работу бота.
 furia_openai_api_key = os.getenv("FURIA_OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
 client = OpenAI(api_key=furia_openai_api_key)
+
+
+def record_furia_failure(error, operation='handle_update', source=None):
+    """Log only an exception class and its category, never its text or user data.
+
+    Diagnostic failures must not interrupt the bot. The existing event counters
+    remain separate and are updated at their original call sites.
+    """
+    if source is None:
+        if isinstance(error, OpenAIError):
+            source = 'openai'
+        elif isinstance(error, TelegramAPIError):
+            source = 'telegram'
+        else:
+            source = 'system'
+    try:
+        record_diagnostic('furia', source, operation, error)
+    except Exception as log_error:
+        print(f'⚠️ Фурия: журнал диагностики недоступен ({type(log_error).__name__})')
 
 
 def record_furia_usage(response, kind, *, wav_path=None):
@@ -65,6 +85,7 @@ def record_furia_usage(response, kind, *, wav_path=None):
             audio_seconds=audio_seconds,
         )
     except Exception as exc:
+        record_furia_failure(exc, 'other', 'system')
         print(f'⚠️ Фурия: не удалось учесть токены ({type(exc).__name__})')
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -126,6 +147,7 @@ def load_memory():
         return memory
 
     except Exception as e:
+        record_furia_failure(e, 'startup', 'system')
 
         print("⚠️ Не удалось загрузить память:")
         print(type(e).__name__)
@@ -161,6 +183,7 @@ def save_memory():
         os.replace(temp_file, MEMORY_FILE)
 
     except Exception as e:
+        record_furia_failure(e, 'other', 'system')
 
         print("⚠️ Не удалось сохранить память:")
         print(type(e).__name__)
@@ -231,6 +254,7 @@ async def get_image_data(photo_file_id):
         )
 
     except Exception as e:
+        record_furia_failure(e, 'handle_update')
 
         print("⚠️ Не удалось загрузить фотографию:")
         print(type(e).__name__)
@@ -649,6 +673,8 @@ def extract_audio_to_wav(
 
             return "no_audio"
 
+        # No audio track is a normal outcome; this branch is a real failure.
+        record_furia_failure(RuntimeError('FFmpeg processing failed'), 'other', 'system')
         print(
             "⚠️ FFmpeg не смог достать звук."
         )
@@ -664,6 +690,7 @@ def extract_audio_to_wav(
         return "error"
 
     except Exception as e:
+        record_furia_failure(e, 'other', 'system')
 
         print(
             "⚠️ Ошибка при извлечении аудио:"
@@ -753,6 +780,7 @@ def transcribe_wav_sync(wav_path):
         )
 
     except Exception as e:
+        record_furia_failure(e, 'transcription')
 
         print(
             "⚠️ Не удалось распознать "
@@ -1147,6 +1175,7 @@ async def process_video(video):
         )
 
     except Exception as e:
+        record_furia_failure(e, 'handle_update')
 
         print(
             "⚠️ Не удалось обработать видео:"
@@ -1541,6 +1570,7 @@ async def channel_post_handler(
 
     except Exception as e:
         record_event('furia', 'errors')
+        record_furia_failure(e, 'generation')
 
         print("❌ Ошибка OpenAI:")
         print(type(e).__name__)
@@ -1582,6 +1612,7 @@ async def channel_post_handler(
 
     except Exception as e:
         record_event('furia', 'errors')
+        record_furia_failure(e, 'send_message')
 
         print(
             "❌ Не удалось "
@@ -1814,6 +1845,7 @@ async def reply_to_furia_handler(
 
     except Exception as e:
         record_event('furia', 'errors')
+        record_furia_failure(e, 'generation')
 
         print("❌ Ошибка OpenAI:")
         print(type(e).__name__)
@@ -1847,6 +1879,7 @@ async def reply_to_furia_handler(
 
     except Exception as e:
         record_event('furia', 'errors')
+        record_furia_failure(e, 'send_message')
 
         print(
             "❌ Не удалось "

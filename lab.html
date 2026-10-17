@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Frankenstein Lab · v1.2</title>
+<title>Frankenstein Lab · v1.4</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,'Segoe UI',Arial,sans-serif;background:#101218;color:#f3f5f8}
 *{box-sizing:border-box}body{margin:0;padding:28px 20px 60px}main{max-width:1200px;margin:auto}
@@ -79,10 +79,39 @@
 .finance-warning{color:#ffadad;font-size:13px;margin:10px 0 0}
 @media(max-width:850px){.finance-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:500px){.finance{padding:16px}.finance-kpis{gap:7px}.finance-kpi{padding:11px}.finance-kpi strong{font-size:21px}.finance-chart{padding:12px 6px}.finance-chart-head label{flex-wrap:wrap}}
+
+/* Lab v1.4: persistent diagnostic journal, separate from activity counters. */
+.diagnostics{margin-top:22px;background:#1b1e26;border:1px solid #313641;border-radius:18px;padding:21px;min-width:0}
+.diagnostics-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
+.diagnostics-head p{margin:7px 0 0}
+.diagnostics-actions{display:flex;gap:9px;align-items:flex-end;flex-wrap:wrap}
+.diagnostics-actions label{display:grid;gap:5px;color:#b9c5d5;font-size:12px}
+.diagnostics-actions select{background:#101218;border:1px solid #505967;border-radius:9px;color:#f3f5f8;padding:9px 11px;font:inherit;min-width:125px}
+.diagnostics-actions select:focus-visible,.diagnostics-clear:focus-visible{outline:2px solid #8de7b3;outline-offset:2px}
+.diagnostics-clear{border:1px solid #81545a;border-radius:9px;background:#46272f;color:#ffc1c8;padding:9px 12px;font:inherit;font-size:13px;font-weight:650;cursor:pointer}
+.diagnostics-clear:disabled{opacity:.5;cursor:wait}
+.diagnostics-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:18px}
+.diagnostics-kpi{background:#141720;border:1px solid #282e39;border-radius:12px;padding:14px;min-width:0}
+.diagnostics-kpi span{display:block;color:#aeb9ca;font-size:12px}
+.diagnostics-kpi strong{display:block;font-size:24px;margin:4px 0;font-variant-numeric:tabular-nums}
+.diagnostics-kpi small{display:block;color:#9da9ba;font-size:11px;line-height:1.5;overflow-wrap:anywhere}
+.diagnostics-feedback{font-size:13px;color:#ffb3b3;min-height:18px;margin:13px 0 0}
+.diagnostics-feedback.ok{color:#8de7b3}
+.diagnostics-table-wrap{overflow-x:auto;margin-top:14px;border:1px solid #303640;border-radius:11px}
+.diagnostics-table{width:100%;min-width:660px;border-collapse:collapse;font-size:13px}
+.diagnostics-table th,.diagnostics-table td{text-align:left;padding:12px 11px;border-bottom:1px solid #303640;white-space:nowrap}
+.diagnostics-table th{color:#aeb9ca;font-size:12px;font-weight:600;background:#161a22}
+.diagnostics-table tr:last-child td{border-bottom:0}
+.diagnostics-table .diag-error{color:#ffacac;font-weight:650}
+.diagnostics-table .diag-time{color:#b5c0d0}
+.diagnostics-empty{color:#b6c1d1;padding:15px;font-size:13px}
+.diagnostics-info{color:#9facbe;font-size:12px;line-height:1.65;margin:13px 0 0}
+@media(max-width:850px){.diagnostics-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:500px){.diagnostics{padding:16px}.diagnostics-kpis{gap:7px}.diagnostics-kpi{padding:11px}.diagnostics-actions{width:100%}.diagnostics-actions label{flex:1 1 130px}.diagnostics-actions select{min-width:0;width:100%}}
 </style>
 </head>
 <body><main>
-<div class="header"><div><h1>🧪 Лаборатория Франкенштейна</h1><p class="subtitle">Центр управления электронными долбоёбами · v1.2</p></div>
+<div class="header"><div><h1>🧪 Лаборатория Франкенштейна</h1><p class="subtitle">Центр управления электронными долбоёбами · v1.4</p></div>
 <div class="actions"><span id="lab-status" class="badge">Подключаемся...</span><button id="logout" class="logout" type="button">Выйти</button></div></div>
 <div class="notice">⚡ Переключатель «ВЫКЛ» запрещает боту отправлять новые ответы, включая продолжение разговоров. Уже отправленные сообщения не удаляются. Статистика и последние 120 событий сохраняются в /data и восстанавливаются после перезапуска Netrun. Статистика не проверяет доступность Telegram API.</div>
 <div class="bots">
@@ -145,6 +174,26 @@
   <div class="finance-models"><table><caption>По моделям за выбранный период</caption><thead><tr><th>Бот</th><th>Модель</th><th class="numeric">Вызовов</th><th class="numeric">Вход</th><th class="numeric">Чтение кэша</th><th class="numeric">Запись кэша</th><th class="numeric">Запись 12 ч</th><th class="numeric">Неизвестный вход</th><th class="numeric">Выход</th><th class="numeric">Оценка, $</th></tr></thead><tbody id="finance-model-rows"><tr><td colspan="10" class="small">Загружаем данные...</td></tr></tbody></table></div>
   <p id="finance-error" class="finance-warning" role="status"></p>
   <p class="finance-info">Учёт начался в v1.1; дни считаются по UTC. <strong>«—» означает неизвестную стоимость, а не нулевую.</strong> Сумма — расчёт по настроенным тарифам, не официальный счёт OpenAI; тарифы могут быть приблизительными. В v1.2 запись в кэш выделяется только по данным API либо при включённом допущении, что весь вход без cache reads был записан в кэш. Такое допущение может завышать стоимость. Если разделить запись и обычный вход нельзя, токены остаются «не классифицировано», а вызов — без расчёта. История v1.1 сохранена, но задним числом на категории кэша не разбивается. Учитываются успешные вызовы; тексты сообщений и промптов не сохраняются.</p>
+</section>
+<section class="diagnostics" aria-labelledby="diagnostics-title">
+  <div class="diagnostics-head">
+    <div><h3 id="diagnostics-title">🩺 Диагностика ботов</h3><p class="muted">Сбои OpenAI, Telegram и сервера · журнал хранится после перезапуска</p></div>
+    <div class="diagnostics-actions">
+      <label for="diagnostics-bot">Бот<select id="diagnostics-bot"><option value="all">Все трое</option><option value="serega">👨 Серёга</option><option value="furia">💅 Фурия</option><option value="mark">🧠 Марк</option></select></label>
+      <label for="diagnostics-source">Источник<select id="diagnostics-source"><option value="all">Все источники</option><option value="openai">OpenAI</option><option value="telegram">Telegram</option><option value="webhook">Webhook</option><option value="system">Сервер</option></select></label>
+      <button id="diagnostics-clear" class="diagnostics-clear" type="button" disabled>Очистить журнал</button>
+    </div>
+  </div>
+  <div class="diagnostics-kpis">
+    <div class="diagnostics-kpi"><span>⚠️ Всего сбоев</span><strong id="diagnostics-total">—</strong><small>С последней очистки</small></div>
+    <div class="diagnostics-kpi"><span>👨 Серёга</span><strong id="diagnostics-serega">—</strong><small id="diagnostics-last-serega">Последняя ошибка: —</small></div>
+    <div class="diagnostics-kpi"><span>💅 Фурия</span><strong id="diagnostics-furia">—</strong><small id="diagnostics-last-furia">Последняя ошибка: —</small></div>
+    <div class="diagnostics-kpi"><span>🧠 Марк</span><strong id="diagnostics-mark">—</strong><small id="diagnostics-last-mark">Последняя ошибка: —</small></div>
+  </div>
+  <p id="diagnostics-feedback" class="diagnostics-feedback" role="status"></p>
+  <div class="diagnostics-table-wrap"><table class="diagnostics-table"><thead><tr><th>Время</th><th>Бот</th><th>Источник</th><th>Операция</th><th>Тип ошибки</th></tr></thead><tbody id="diagnostics-rows"><tr><td colspan="5" class="diagnostics-empty">Ожидаем данные диагностики...</td></tr></tbody></table></div>
+  <p id="diagnostics-shown" class="small">Загружаем журнал...</p>
+  <p class="diagnostics-info">Время отображается по часовому поясу устройства. Сохраняются последние 200 ошибок и общие счётчики с момента очистки. Тип ошибки — название класса исключения, без текста переписки, содержимого запросов, Telegram ID и API-ключей. Счётчики ошибок в карточках ботов и аналитике не сбрасываются кнопкой очистки журнала. Журнал начнёт собирать события после установки v1.4; старые ошибки задним числом не восстановятся.</p>
 </section>
 <section class="access" aria-labelledby="access-title"><h3 id="access-title">🔐 Доступ к личному Серёге</h3>
 <p class="muted">Добавляй участников закрытого тестирования по числовому Telegram ID. Изменения вступают в силу сразу и сохраняются после перезапуска. Пользователи из секрета Netrun сохраняют доступ независимо от этого списка.</p>
@@ -450,7 +499,75 @@ for(const button of document.querySelectorAll('[data-days]'))button.addEventList
   renderAnalytics();renderFinance();
 });
 
-async function refresh(){try{const r=await fetch('/lab/api/status',{cache:'no-store'});if(r.status===401){location.assign('/lab/');return;}if(!r.ok)throw Error(`HTTP ${r.status}`);const data=await r.json();csrf=data.csrf;get('lab-status').textContent=`● Лаборатория online · v${data.version}`;get('lab-status').classList.remove('bad');get('connection-error').textContent='';for(const bot of bots){const info=data.bots[bot],el=card(bot);for(const key of ['received','sent','errors'])el.querySelector(`[data-stat="${key}"]`).textContent=info.stats[key];el.querySelector('.activity').textContent=`Последнее входящее: ${fmtTime(info.stats.last_received)} · ответ: ${fmtTime(info.stats.last_sent)}`;if(!busy.has(bot)){powerState[bot]=info.enabled;showPower(bot,info.enabled);get(`${bot}-power`).disabled=false;}if(!initialized&&adjustable.includes(bot)){saved[bot]={probability:info.probability,delay_min:info.delay_min,delay_max:info.delay_max};applySliders(bot,saved[bot]);enableSliders(bot,true);notice(bot,'Настройки загружены');}}renderEvents(data.events||[]);renderAccess(data.access);analyticsState.data=data.analytics||null;financeState.data=data.costs||null;renderAnalytics();renderFinance();initialized=true;}catch(e){get('lab-status').textContent='● Нет связи с лабораторией';get('lab-status').classList.add('bad');get('connection-error').textContent='Не удалось обновить журнал и статусы. Проверь соединение.';console.error(e);}}
+
+// Lab v1.4 diagnostics: read-only journal and CSRF-protected clear action.
+const diagnosticsState={data:null,bot:'all',source:'all',clearing:false};
+const diagnosticsSourceNames={openai:'OpenAI',telegram:'Telegram',webhook:'Webhook',system:'Сервер'};
+const diagnosticsOperationNames={generation:'Генерация',transcription:'Распознавание речи',send_message:'Отправка сообщения',send_photo:'Отправка фото',get_updates:'Получение обновлений',handle_update:'Обработка сообщения',webhook:'Webhook',startup:'Запуск',background:'Фоновая задача',other:'Другая операция'};
+function diagnosticsFeedback(text,ok=false){
+  const el=get('diagnostics-feedback');el.textContent=text;el.className=ok?'diagnostics-feedback ok':'diagnostics-feedback';
+}
+function renderDiagnostics(){
+  const data=diagnosticsState.data;
+  const rows=get('diagnostics-rows');rows.replaceChildren();
+  const clear=get('diagnostics-clear');
+  clear.disabled=diagnosticsState.clearing||!data||Boolean(data.read_error);
+  if(!data){
+    get('diagnostics-shown').textContent='Диагностика недоступна: проверь, что сервер обновлён до v1.4.';
+    const tr=document.createElement('tr'),td=document.createElement('td');td.colSpan=5;td.className='diagnostics-empty';td.textContent='Нет данных диагностики от сервера.';tr.append(td);rows.append(tr);
+    return;
+  }
+  const counts=data.counts||{},last=data.last_error||{};
+  const total=bots.reduce((sum,bot)=>sum+Math.max(0,Number(counts[bot])||0),0);
+  get('diagnostics-total').textContent=total.toLocaleString('ru-RU');
+  for(const bot of bots){
+    get(`diagnostics-${bot}`).textContent=Math.max(0,Number(counts[bot])||0).toLocaleString('ru-RU');
+    get(`diagnostics-last-${bot}`).textContent=`Последняя ошибка: ${fmtTime(last[bot])}`;
+  }
+  if(data.read_error){
+    diagnosticsFeedback('⚠️ Файл lab_diagnostics.json повреждён. Запись и очистка заблокированы до исправления на сервере.');
+  }
+  const events=Array.isArray(data.events)?data.events:[];
+  const filtered=events.filter(e=>(diagnosticsState.bot==='all'||e.bot===diagnosticsState.bot)&&
+    (diagnosticsState.source==='all'||e.source===diagnosticsState.source));
+  get('diagnostics-shown').textContent=`Показано ${filtered.length} из ${events.length} сохранённых событий · всего сбоев с последней очистки: ${total.toLocaleString('ru-RU')}`;
+  if(!filtered.length){
+    const tr=document.createElement('tr'),td=document.createElement('td');td.colSpan=5;td.className='diagnostics-empty';
+    td.textContent=events.length?'По выбранным фильтрам ошибок нет.':'Ошибок пока нет — и это хорошо.';
+    tr.append(td);rows.append(tr);return;
+  }
+  for(const event of filtered){
+    const tr=document.createElement('tr');
+    const values=[fmtTime(event.time),names[event.bot]||event.bot,
+      diagnosticsSourceNames[event.source]||event.source,
+      diagnosticsOperationNames[event.operation]||event.operation,
+      event.error_type||'UnknownError'];
+    values.forEach((value,index)=>{const td=document.createElement('td');td.textContent=value;
+      if(index===0)td.className='diag-time';if(index===4)td.className='diag-error';tr.append(td);});
+    rows.append(tr);
+  }
+}
+async function clearDiagnostics(){
+  if(diagnosticsState.clearing||!diagnosticsState.data||diagnosticsState.data.read_error)return;
+  if(!confirm('Очистить журнал диагностики и его счётчики? Статистика ботов, аналитика и расходы останутся без изменений.'))return;
+  diagnosticsState.clearing=true;get('diagnostics-clear').disabled=true;
+  diagnosticsFeedback('⏳ Очищаем журнал...');
+  try{
+    const r=await fetch('/lab/api/diagnostics/clear',{
+      method:'POST',headers:{'X-CSRF-Token':csrf},body:''
+    });
+    if(r.status===401){location.assign('/lab/');return;}
+    if(!r.ok)throw Error(`HTTP ${r.status}`);
+    diagnosticsState.data={...diagnosticsState.data,events:[],counts:{serega:0,furia:0,mark:0},last_error:{serega:null,furia:null,mark:null}};
+    diagnosticsFeedback('✓ Журнал очищен. Остальная статистика сохранена.',true);
+  }catch(e){diagnosticsFeedback(`✕ Не удалось очистить журнал: ${e.message}`);}
+  finally{diagnosticsState.clearing=false;renderDiagnostics();}
+}
+get('diagnostics-bot').addEventListener('change',event=>{diagnosticsState.bot=event.target.value;renderDiagnostics();});
+get('diagnostics-source').addEventListener('change',event=>{diagnosticsState.source=event.target.value;renderDiagnostics();});
+get('diagnostics-clear').addEventListener('click',clearDiagnostics);
+
+async function refresh(){try{const r=await fetch('/lab/api/status',{cache:'no-store'});if(r.status===401){location.assign('/lab/');return;}if(!r.ok)throw Error(`HTTP ${r.status}`);const data=await r.json();csrf=data.csrf;get('lab-status').textContent=`● Лаборатория online · v${data.version}`;get('lab-status').classList.remove('bad');get('connection-error').textContent='';for(const bot of bots){const info=data.bots[bot],el=card(bot);for(const key of ['received','sent','errors'])el.querySelector(`[data-stat="${key}"]`).textContent=info.stats[key];el.querySelector('.activity').textContent=`Последнее входящее: ${fmtTime(info.stats.last_received)} · ответ: ${fmtTime(info.stats.last_sent)}`;if(!busy.has(bot)){powerState[bot]=info.enabled;showPower(bot,info.enabled);get(`${bot}-power`).disabled=false;}if(!initialized&&adjustable.includes(bot)){saved[bot]={probability:info.probability,delay_min:info.delay_min,delay_max:info.delay_max};applySliders(bot,saved[bot]);enableSliders(bot,true);notice(bot,'Настройки загружены');}}renderEvents(data.events||[]);renderAccess(data.access);analyticsState.data=data.analytics||null;financeState.data=data.costs||null;diagnosticsState.data=data.diagnostics||null;renderAnalytics();renderFinance();renderDiagnostics();initialized=true;}catch(e){get('lab-status').textContent='● Нет связи с лабораторией';get('lab-status').classList.add('bad');get('connection-error').textContent='Не удалось обновить журнал и статусы. Проверь соединение.';console.error(e);}}
 for(const bot of bots)get(`${bot}-power`).addEventListener('change',e=>savePower(bot,e.target.checked));
 for(const bot of adjustable)for(const field of fields){const slider=get(`${bot}-${field.replaceAll('_','-')}`);slider.addEventListener('input',()=>{if(field==='delay_min'){const max=get(`${bot}-delay-max`);if(+slider.value>+max.value)max.value=slider.value;}if(field==='delay_max'){const min=get(`${bot}-delay-min`);if(+slider.value<+min.value)min.value=slider.value;}showSliders(bot);notice(bot,'Изменено — отпусти ползунок для сохранения');});slider.addEventListener('change',()=>saveSettings(bot));}
 get('access-form').addEventListener('submit',addAccess);

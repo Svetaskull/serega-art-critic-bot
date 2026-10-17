@@ -1,4 +1,4 @@
-"""Frankenstein Lab v1.2: password-protected controls for the shared aiohttp host.
+"""Frankenstein Lab v1.4: password-protected controls for the shared aiohttp host.
 
 Requires LAB_PASSWORD (at least 12 characters). Without it all /lab routes return 404.
 Do not run the old local lab_server.py in the cloud.
@@ -25,6 +25,7 @@ ANALYTICS_FILE = DATA_DIR / 'lab_analytics.json'
 COSTS_FILE = DATA_DIR / 'lab_costs.json'
 ACCESS_FILE = DATA_DIR / 'lab_access.json'
 TESTERS_FILE = DATA_DIR / 'lab_testers.json'
+DIAGNOSTICS_FILE = DATA_DIR / 'lab_diagnostics.json'
 TESTER_REQUEST_LIMIT_MAX = 10000
 ACCESS_LIMIT = 30
 # IDs from Netrun remain allowed and cannot be revoked from the dashboard.
@@ -536,6 +537,128 @@ def _costs_snapshot():
                 os.getenv('LAB_LUNA_ASSUME_UNCACHED_WRITES', '').strip() == '1'}
 
 
+
+# v1.4: independent, privacy-safe diagnostic journal. Bot integrations call
+# record_diagnostic() when an actual failure occurs. Never persist raw error
+# messages, tracebacks, Telegram content, prompts, user IDs, or API keys.
+DIAGNOSTICS_MAX_EVENTS = 200
+DIAGNOSTICS_SOURCES = frozenset(('openai', 'telegram', 'webhook', 'system'))
+DIAGNOSTICS_OPERATIONS = frozenset((
+    'generation', 'transcription', 'send_message', 'send_photo',
+    'get_updates', 'handle_update', 'webhook', 'startup', 'background', 'other',
+))
+DIAGNOSTICS = []  # Newest first; last 200 only.
+DIAGNOSTICS_COUNTS = {bot: 0 for bot in STATS}
+
+
+def _load_diagnostics():
+    if not DIAGNOSTICS_FILE.exists():
+        return [], {bot: 0 for bot in STATS}, False
+    try:
+        if DIAGNOSTICS_FILE.stat().st_size > 128 * 1024:
+            raise ValueError('Diagnostic file too large')
+        data = json.loads(DIAGNOSTICS_FILE.read_text(encoding='utf-8'))
+        if (not isinstance(data, dict) or data.get('version') != 1
+                or not isinstance(data.get('events'), list)
+                or len(data['events']) > DIAGNOSTICS_MAX_EVENTS
+                or not isinstance(data.get('counts'), dict)
+                or set(data['counts']) != set(STATS)):
+            raise ValueError('Invalid diagnostics structure')
+        counts = data['counts']
+        if any(type(value) is not int or not 0 <= value <= 1_000_000_000
+               for value in counts.values()):
+            raise ValueError('Invalid diagnostics counts')
+        events = []
+        for item in data['events']:
+            if not isinstance(item, dict) or set(item) != {
+                    'time', 'bot', 'source', 'operation', 'error_type'}:
+                raise ValueError('Invalid diagnostic event')
+            stamp = item['time']
+            if (not isinstance(stamp, str) or len(stamp) > 40
+                    or item['bot'] not in STATS
+                    or item['source'] not in DIAGNOSTICS_SOURCES
+                    or item['operation'] not in DIAGNOSTICS_OPERATIONS
+                    or not isinstance(item['error_type'], str)
+                    or not 1 <= len(item['error_type']) <= 64
+                    or not item['error_type'].isascii()
+                    or not all(c.isalnum() or c == '_' for c in item['error_type'])):
+                raise ValueError('Invalid diagnostic values')
+            datetime.fromisoformat(stamp)
+            events.append(item.copy())
+        if any(counts[bot] < sum(e['bot'] == bot for e in events) for bot in STATS):
+            raise ValueError('Invalid diagnostic totals')
+        print(f'🧪 Лаборатория: журнал диагностики восстановлен ({len(events)} записей)')
+        return events, counts.copy(), False
+    except (OSError, ValueError, TypeError, KeyError, OverflowError):
+        print('⚠️ Лаборатория: журнал диагностики повреждён; запись заблокирована.')
+        return [], {bot: 0 for bot in STATS}, True
+
+
+def _save_diagnostics(events, counts):
+    """Called under LOCK; a failed write leaves the old file untouched."""
+    temporary = DIAGNOSTICS_FILE.with_suffix('.json.tmp')
+    try:
+        with temporary.open('w', encoding='utf-8') as file:
+            json.dump({'version': 1, 'events': events, 'counts': counts},
+                      file, ensure_ascii=False, separators=(',', ':'))
+        os.replace(temporary, DIAGNOSTICS_FILE)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
+DIAGNOSTICS, DIAGNOSTICS_COUNTS, DIAGNOSTICS_LOAD_ERROR = _load_diagnostics()
+
+
+def record_diagnostic(bot, source, operation='other', error=None):
+    """Persist safe metadata for a real bot failure; never log exception text.
+
+    Example: record_diagnostic('furia', 'openai', 'generation', exc)
+    Keep existing record_event(bot, 'errors') calls for legacy counters.
+    """
+    if (bot not in STATS or source not in DIAGNOSTICS_SOURCES
+            or operation not in DIAGNOSTICS_OPERATIONS):
+        return
+    # Exception class only. str(error) could leak messages, tokens or IDs.
+    if isinstance(error, BaseException):
+        error_type = type(error).__name__
+    elif isinstance(error, type) and issubclass(error, BaseException):
+        error_type = error.__name__
+    else:
+        error_type = 'UnknownError'
+    if (not error_type.isascii() or len(error_type) > 64
+            or not all(c.isalnum() or c == '_' for c in error_type)):
+        error_type = 'UnknownError'
+    entry = {'time': datetime.now(timezone.utc).isoformat(timespec='seconds'),
+             'bot': bot, 'source': source, 'operation': operation,
+             'error_type': error_type}
+    with LOCK:
+        if DIAGNOSTICS_LOAD_ERROR or DIAGNOSTICS_COUNTS[bot] >= 1_000_000_000:
+            return
+        updated_events = [entry] + DIAGNOSTICS[:DIAGNOSTICS_MAX_EVENTS - 1]
+        updated_counts = DIAGNOSTICS_COUNTS | {bot: DIAGNOSTICS_COUNTS[bot] + 1}
+        try:
+            _save_diagnostics(updated_events, updated_counts)
+        except OSError:
+            print('⚠️ Лаборатория: ошибка сохранения журнала диагностики.')
+            return
+        DIAGNOSTICS[:] = updated_events
+        DIAGNOSTICS_COUNTS.update(updated_counts)
+
+
+def _diagnostics_snapshot():
+    """Under LOCK. Counters are since the last journal clear."""
+    return {
+        'events': [item.copy() for item in DIAGNOSTICS],
+        'counts': DIAGNOSTICS_COUNTS.copy(),
+        'last_error': {bot: next((item['time'] for item in DIAGNOSTICS
+                                 if item['bot'] == bot), None) for bot in STATS},
+        'read_error': DIAGNOSTICS_LOAD_ERROR,
+        'limit': DIAGNOSTICS_MAX_EVENTS,
+        'timezone': 'UTC',
+    }
+
+
 # Separately persisted private-chat allowlist; independent of bot settings.
 # Invalid or damaged data fails closed; do not overwrite it automatically.
 def _valid_user_id(value):
@@ -938,7 +1061,7 @@ async def status_handler(request):
         events = list(EVENTS)[:50]
         managed_users = sorted(MANAGED_USERS.items())
         access_load_error = ACCESS_LOAD_ERROR
-    result = {'lab': 'online', 'version': '1.2', 'csrf': session[1],
+    result = {'lab': 'online', 'version': '1.4', 'csrf': session[1],
               'started_at': STARTED_AT, 'events': events, 'bots': {},
               'access': {'managed': [{'id': str(uid), 'label': label}
                                      for uid, label in managed_users],
@@ -965,6 +1088,7 @@ async def status_handler(request):
     with LOCK:
         result['analytics'] = _analytics_snapshot()
         result['costs'] = _costs_snapshot()
+        result['diagnostics'] = _diagnostics_snapshot()
     return _security_headers(web.json_response(result))
 
 
@@ -1160,6 +1284,26 @@ async def tester_reset_handler(request):
     return _security_headers(web.json_response({'success': True}))
 
 
+
+async def diagnostics_clear_handler(request):
+    """Clear only the diagnostic journal, not legacy stats or costs."""
+    session = _require_session(request)
+    _require_csrf(request, session)
+    if request.content_length is not None and request.content_length > 256:
+        raise web.HTTPBadRequest(text='Неверный размер запроса')
+    with LOCK:
+        if DIAGNOSTICS_LOAD_ERROR:
+            raise web.HTTPServiceUnavailable(text='Журнал повреждён. Очистка заблокирована.')
+        empty_counts = {bot: 0 for bot in STATS}
+        try:
+            _save_diagnostics([], empty_counts)
+        except OSError:
+            raise web.HTTPInternalServerError(text='Не удалось очистить журнал')
+        DIAGNOSTICS.clear()
+        DIAGNOSTICS_COUNTS.update(empty_counts)
+    return _security_headers(web.json_response({'success': True}))
+
+
 async def redirect_handler(request):
     raise web.HTTPFound('/lab/')
 
@@ -1176,7 +1320,8 @@ def register_routes(app):
     app.router.add_post('/lab/api/access/remove', access_remove_handler)
     app.router.add_post('/lab/api/testers/limit', tester_limit_handler)
     app.router.add_post('/lab/api/testers/reset', tester_reset_handler)
+    app.router.add_post('/lab/api/diagnostics/clear', diagnostics_clear_handler)
     if LAB_ENABLED:
-        print(f'🧪 Frankenstein Lab v1.2: включена; настройки в {SETTINGS_FILE}')
+        print(f'🧪 Frankenstein Lab v1.4: включена; настройки в {SETTINGS_FILE}')
     else:
         print('🔒 Frankenstein Lab отключена: задай LAB_PASSWORD длиной от 12 символов.')

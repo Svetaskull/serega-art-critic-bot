@@ -9,11 +9,28 @@ from aiohttp import web
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart
 from aiogram.types import Message, Update
-from openai import OpenAI
+from aiogram.exceptions import TelegramAPIError
+from openai import OpenAI, OpenAIError
 
 import furia_bot
 import mark_bot
 import lab_control
+
+
+def record_failure(bot_name: str, exc: Exception, operation: str = 'handle_update'):
+    """Only exception class and failure category reach the Lab journal.
+
+    Legacy error counters remain managed by record_event() at the call site.
+    Never send exception messages, chat IDs, prompts or Telegram updates to Lab.
+    """
+    if isinstance(exc, OpenAIError):
+        source = 'openai'
+        operation = 'generation'
+    elif isinstance(exc, TelegramAPIError):
+        source = 'telegram'
+    else:
+        source = 'system'
+    lab_control.record_diagnostic(bot_name, source, operation, exc)
 
 
 # =========================================================
@@ -490,6 +507,7 @@ async def channel_post_handler(
     except Exception as e:
 
         lab_control.record_event('serega', 'errors')
+        record_failure('serega', e)
         print("")
         print(
             "❌ СЕРЁГА НЕ СМОГ "
@@ -860,6 +878,7 @@ async def private_process_messages(messages: list[Message]):
 
         except Exception as exc:
             lab_control.record_event("serega", "errors")
+            record_failure("serega", exc)
             print("❌ Серёга 2.2: ошибка личного режима:", type(exc).__name__, str(exc)[:300])
             if lab_control.get_bot_enabled("serega") and private_access_allowed(message):
                 await private_answer(message, "Не смог обработать запрос. Попробуй ещё раз чуть позже.")
@@ -951,7 +970,7 @@ async def private_art_director_handler(message: Message):
         if album is None:
             album = {"messages": [], "updated": time.monotonic(), "task": None}
             private_albums[key] = album
-            album["task"] = run_in_background(private_flush_album(key))
+            album["task"] = run_in_background(private_flush_album(key), "serega")
         album["messages"].append(message)
         album["updated"] = time.monotonic()
         return
@@ -1017,50 +1036,28 @@ MARK_WEBHOOK_SECRET = hashlib.sha256(
 background_tasks = set()
 
 
-def background_task_finished(
-    task: asyncio.Task
-):
-
-    background_tasks.discard(
-        task
-    )
-
+def background_task_finished(task: asyncio.Task, bot_name: str | None = None):
+    background_tasks.discard(task)
     try:
         task.result()
-
     except asyncio.CancelledError:
         pass
-
-    except Exception as e:
-
-        print("")
-        print(
-            "❌ ОШИБКА ФОНОВОЙ "
-            "ОБРАБОТКИ UPDATE"
-        )
-        print(
-            type(e).__name__,
-            e
-        )
-        print("")
+    except Exception as exc:
+        # A background exception otherwise only appears in Netrun logs.
+        # Count it once here; exceptions handled inside bot handlers do not
+        # reach this callback and will not be counted twice.
+        if bot_name in ('serega', 'furia', 'mark'):
+            lab_control.record_event(bot_name, 'errors')
+            record_failure(bot_name, exc, 'background')
+        print('❌ ОШИБКА ФОНОВОЙ ОБРАБОТКИ UPDATE:', type(exc).__name__, exc)
 
 
-def run_in_background(
-    coroutine
-):
-
-    task = asyncio.create_task(
-        coroutine
-    )
-
-    background_tasks.add(
-        task
-    )
-
+def run_in_background(coroutine, bot_name: str | None = None):
+    task = asyncio.create_task(coroutine)
+    background_tasks.add(task)
     task.add_done_callback(
-        background_task_finished
+        lambda finished: background_task_finished(finished, bot_name)
     )
-
     return task
 
 
@@ -1121,7 +1118,8 @@ async def serega_webhook_handler(
             dp.feed_update(
                 bot,
                 update
-            )
+            ),
+            'serega'
         )
 
         return web.Response(
@@ -1130,6 +1128,7 @@ async def serega_webhook_handler(
 
     except Exception as e:
         lab_control.record_event('serega', 'errors')
+        lab_control.record_diagnostic('serega', 'webhook', 'webhook', e)
 
         print("")
         print(
@@ -1192,7 +1191,8 @@ async def furia_webhook_handler(
             furia_bot.dp.feed_update(
                 furia_bot.bot,
                 update
-            )
+            ),
+            'furia'
         )
 
         return web.Response(
@@ -1201,6 +1201,7 @@ async def furia_webhook_handler(
 
     except Exception as e:
         lab_control.record_event('furia', 'errors')
+        lab_control.record_diagnostic('furia', 'webhook', 'webhook', e)
 
         print("")
         print(
@@ -1251,13 +1252,15 @@ async def mark_webhook_handler(
             mark_bot.dp.feed_update(
                 mark_bot.bot,
                 update
-            )
+            ),
+            'mark'
         )
 
         return web.Response(text="OK")
 
     except Exception as e:
         lab_control.record_event('mark', 'errors')
+        lab_control.record_diagnostic('mark', 'webhook', 'webhook', e)
         print("")
         print("❌ ОШИБКА ПРИ ПРИЁМЕ WEBHOOK МАРКА")
         print(type(e).__name__, e)
@@ -1300,8 +1303,18 @@ async def on_startup(
     print("=" * 50)
     print("")
 
-    await furia_bot.startup()
-    await mark_bot.startup()
+    try:
+        await furia_bot.startup()
+    except Exception as exc:
+        lab_control.record_event('furia', 'errors')
+        lab_control.record_diagnostic('furia', 'system', 'startup', exc)
+        raise
+    try:
+        await mark_bot.startup()
+    except Exception as exc:
+        lab_control.record_event('mark', 'errors')
+        lab_control.record_diagnostic('mark', 'system', 'startup', exc)
+        raise
 
 
 async def on_cleanup(
